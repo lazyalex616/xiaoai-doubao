@@ -106,6 +106,13 @@ elif a[0]=='partition':(r/'written').touch()
                 self.assertEqual(log.read_bytes(),b'previous\n'+raw)
                 self.assertEqual(log.stat().st_mode & 0o777,0o600)
                 self.assertEqual((self.local/'usb.json').exists(),ok)
+    def test_accessory_permission_stop(self):
+        self.write('mode','identify_no_worldcup')
+        result=self.run_step(5,'--execute',ok=False)
+        self.assertEqual(result.stdout.splitlines()[-2], 'STOP: 刷机设备没能连上 Mac：多半是 macOS 弹出了"允许配件连接"。请在 系统设置→隐私与安全性 把"允许配件连接"临时改成解锁时自动允许，或下次弹窗时点允许，然后重来')
+        self.assertEqual((self.root/'calls').read_text().splitlines(), ['identify 7'])
+        self.assertFalse((self.local/'usb.json').exists())
+
     def test_wrong_port(self):self.write('mode','wrong');self.run_step(5,'--execute',ok=False)
     def test_boot1(self):
         self.backup();self.write('mode','boot1');self.run_step(7,'--i-accept-brick-risk',ok=False);self.assertFalse((self.root/'written').exists())

@@ -190,6 +190,8 @@ def prepare(step,a):
                 with (LOCAL/'identify.log').open('ab') as log:
                     os.fchmod(log.fileno(),0o600)
                     log.write(p.stdout)
+                if b'No [WorldCup' in p.stdout:
+                    raise RuntimeError('刷机设备没能连上 Mac：多半是 macOS 弹出了"允许配件连接"。请在 系统设置→隐私与安全性 把"允许配件连接"临时改成解锁时自动允许，或下次弹窗时点允许，然后重来')
                 if not (p.returncode==0 and b'This firmware version is' in p.stdout and b'ERR' not in p.stdout and b'No [WorldCup' not in p.stdout): raise RuntimeError('identify failed; no retry')
                 snapshot(a,port);save('usb.json',{'port':port});return
             if g['normal'] and g['normal'][0]['location']!=port: raise RuntimeError('normal USB changed port; GitHub提Issue')
