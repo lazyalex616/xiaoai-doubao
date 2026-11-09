@@ -9,6 +9,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch, Mock
+from types import SimpleNamespace
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+import firmware
 
 class USBTest(unittest.TestCase):
     def setUp(self):
@@ -34,6 +38,8 @@ def emit(port,vid,pid):
  print('  "idVendor" = '+str(vid));print('  "idProduct" = '+str(pid))
 if m=='two':
  emit('abc001',0x2717,0xd002);emit('abc002',0x2717,0xd002)
+elif (r/'reset').exists():
+ if m!='reset_timeout':emit('abc001',0x2717,0xd002)
 elif n==0:emit('abc001',0x2717,0xd002)
 else:emit('abc002' if m=='wrong' else 'abc001',0x1b8e,0xc003)
 ''')
@@ -44,7 +50,12 @@ r=Path(__file__).parent;a=sys.argv[1:];m=(r/'mode').read_text()
 with (r/'calls').open('a') as f:f.write(' '.join(a)+'\\n')
 if a[0]=='identify':print('This firmware version is fake')
 elif a[0]=='bulkcmd':
- c=a[1].strip();ok=c=='test 1 = 1' or ('boot0' in c and m!='boot1') or ('boot1' in c and m=='boot1')
+ c=a[1].strip()
+ if c=='reset':
+  (r/'reset').touch()
+  if m=='reset_err':print('ERR: bulkcmd failed!');sys.exit(197)
+  sys.exit(0)
+ ok=c=='test 1 = 1' or ('boot0' in c and m!='boot1') or ('boot1' in c and m=='boot1')
  print('bulkInReply success' if ok else 'failed')
 elif a[0]=='mread':
  part=a[2];size=int(a[4],16)
@@ -54,7 +65,6 @@ elif a[0]=='mread':
  if m=='backup_mismatch' and a[5].endswith('.2.bin'):data=b'BAD'+data[3:]
  Path(a[5]).write_bytes((data+b'\\0'*size)[:size])
 elif a[0]=='partition':(r/'written').touch()
-elif a[0]=='reset':(r/'reset').touch()
 ''')
         for p in (self.ioreg,self.update):p.chmod(0o700)
         (self.local/'tool.json').write_text(json.dumps({'sha256':hashlib.sha256(self.update.read_bytes()).hexdigest()}))
@@ -85,5 +95,19 @@ elif a[0]=='reset':(r/'reset').touch()
         self.run_step(7);self.assertFalse((self.root/'calls').exists());self.assertFalse((self.root/'count').exists())
     def test_reset_only(self):
         self.run_step(5,'--execute');self.run_step(7,'--reset-only','--execute');self.assertTrue((self.root/'reset').exists());self.assertFalse((self.root/'written').exists())
+
+    def test_reset_err_then_normal(self):
+        self.run_step(5,'--execute');self.write('mode','reset_err')
+        self.run_step(7,'--reset-only','--execute')
+        self.assertIn('ERR:',(self.local/'update.log').read_text())
+        self.assertEqual((self.root/'calls').read_text().splitlines()[-1],'bulkcmd      reset')
+    def test_reset_timeout(self):
+        self.run_step(5,'--execute');self.write('mode','reset_timeout')
+        args=SimpleNamespace(reset_only=True,ioreg=str(self.ioreg),update=self.update)
+        with patch.object(firmware,'LOCAL',self.local), patch.object(firmware,'time',SimpleNamespace(monotonic=Mock(side_effect=[0,0,59.8,60]),sleep=Mock())) as clock:
+            with self.assertRaisesRegex(RuntimeError,'音箱没有正常回到普通模式；先不要拔插，到 GitHub 提 Issue'):
+                firmware.prepare(7,args)
+            self.assertEqual(clock.sleep.call_count,2)
+            clock.sleep.assert_called_with(.2)
 
 if __name__=='__main__':unittest.main()

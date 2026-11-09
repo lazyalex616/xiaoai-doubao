@@ -63,10 +63,27 @@ def tool(args, *cmd, failed_test=False):
     text=p.stdout.decode(errors='replace')
     # Raw tool output may contain device identity; retain it only in private local log.
     with (LOCAL/'update.log').open('ab') as f: f.write(p.stdout)
-    snapshot(args,port) if cmd[0]!='reset' else None
+    snapshot(args,port)
     if failed_test: return p.returncode,text
     if p.returncode or any(x in text.lower() for x in ('err','fail','timeout')): raise RuntimeError('update failed; no retry, no reset')
     return text
+
+def reset(a):
+    port=json.loads((LOCAL/'usb.json').read_text())['port'];snapshot(a,port)
+    with (LOCAL/'update.log').open('ab') as log:
+        subprocess.run([str(a.update),'bulkcmd','     reset'],stdout=log,
+                       stderr=subprocess.STDOUT,timeout=20)
+    end=time.monotonic()+60
+    while time.monotonic()<end:
+        g=registry(a)
+        devices=g['normal']+g['worldcup']
+        if (g['other_amlogic'] or len(devices)>1 or
+                any(d['location']!=port for d in devices)):
+            break
+        if len(g['normal'])==1 and not g['worldcup']:
+            return
+        time.sleep(.2)
+    raise RuntimeError('音箱没有正常回到普通模式；先不要拔插，到 GitHub 提 Issue')
 
 def boot_part(a):
     results=[]
@@ -167,7 +184,7 @@ def prepare(step,a):
             if sha(b/f'{part}.1.bin')!=sha(b/f'{part}.2.bin'): raise RuntimeError('backup hash mismatch; GitHub提Issue')
         check_stock();save('backup.json',{'files':{p.name:sha(p) for p in b.glob('*.bin')}})
     elif step==7:
-        if a.reset_only: tool(a,'reset');return
+        if a.reset_only: reset(a);return
         if boot_part(a)!='boot0': raise RuntimeError('boot_part=boot1 unsupported; GitHub提Issue')
         check_stock();manifest=json.loads((LOCAL/'backup.json').read_text())
         for name,digest in manifest['files'].items():
@@ -178,7 +195,7 @@ def prepare(step,a):
         tool(a,'partition','system0',image)
         dest=LOCAL/'flash-readback.bin';read(a,'system0',size,dest)
         if sha(dest)!=sha(image): raise RuntimeError('readback hash mismatch; no reset; GitHub提Issue')
-        tool(a,'reset')
+        reset(a)
 
 def entry(step=None):
     os.umask(0o077)
@@ -193,11 +210,11 @@ def entry(step=None):
     p.add_argument('--libusb',type=Path,help='本机libusb-compat dylib；默认Homebrew')
     p.add_argument('--ioreg',default='/usr/sbin/ioreg',help='ioreg路径；离线模拟可替换')
     p.add_argument('--update',type=Path,default=LOCAL/'update',help='update路径；离线模拟可替换')
-    p.add_argument('--duration',type=float,default=30)
+    p.add_argument('--duration',type=float,default=120)
     a=p.parse_args()
     if not 3<=a.duration<=120: p.error('duration must be 3..120')
     if step>=5 and not (a.i_accept_brick_risk if step==7 and not a.reset_only else a.execute):
-        print({5:'update identify 7',6:'update bulkcmd test; update mread store <boot0/boot1/system0/system1> normal <length> <file> (twice)',7:'update reset' if a.reset_only else 'update partition system0 .local/root-patched.squashfs; update mread ...; update reset'}[step])
+        print({5:'update identify 7',6:'update bulkcmd test; update mread store <boot0/boot1/system0/system1> normal <length> <file> (twice)',7:'update bulkcmd "     reset"' if a.reset_only else 'update partition system0 .local/root-patched.squashfs; update mread ...; update bulkcmd "     reset"'}[step])
         print('OK: dry run; no device commands\nNEXT: '+NEXT[step]);return
     LOCAL.mkdir(mode=0o700,exist_ok=True)
     try:

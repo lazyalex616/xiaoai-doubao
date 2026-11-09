@@ -113,6 +113,15 @@ def content(a,package):
     shutil.copyfile(config(a),stage/'config.ini');(stage/'config.ini').chmod(0o600)
     return stage
 
+def wait_ready(a, offset):
+    end=time.monotonic()+35
+    while time.monotonic()<end:
+        text=ssh(a,'if [ -f '+APP+'/xiaoai_plus.log ]; then tail -c +'+str(offset+1)+' '+APP+'/xiaoai_plus.log; fi')
+        if 'app components started' in text and 'kws keywords: 1 wake, 6 exit' in text:
+            return
+        time.sleep(1)
+    raise RuntimeError('启动35秒内未出现两条就绪日志')
+
 def install(a):
     package=a.package or LOCAL/'xiaoai-doubao-oh2p-v0.1.0.tar.gz'
     if a.check_only:
@@ -136,7 +145,7 @@ def install(a):
     ssh(a,'cd '+APP+'; ./xiaoai_plus_speaker --check-config -c config.ini >/dev/null')
     offset=int(ssh(a,'if [ -f '+APP+'/xiaoai_plus.log ]; then wc -c < '+APP+'/xiaoai_plus.log; else echo 0; fi').strip())
     ssh(a,'nohup '+APP+'/boot.sh </dev/null >/dev/null 2>&1 &')
-    time.sleep(5)
+    wait_ready(a,offset)
     result=ssh(a,"set -eu; test -f "+APP+"/xiaoai_plus.log; pidof xiaoai_plus_speaker; pidof mipns-xiaomi; if tail -c +"+str(offset+1)+" "+APP+"/xiaoai_plus.log | grep -Ei 'error|fatal' >/dev/null; then exit 1; fi")
     if len(result.splitlines())<2: raise RuntimeError('speaker/native process missing')
     # Process ticks over wall time measure a full 3-minute idle window; SSH only reads /proc.
