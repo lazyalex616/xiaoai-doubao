@@ -49,6 +49,30 @@ def download(url, p, digest):
 def save(name, value):
     p=LOCAL/name;p.write_text(json.dumps(value));p.chmod(0o600)
 
+def check_tool_libraries(update, libusb):
+    pending=[Path(update),Path(libusb)];seen=set()
+    while pending:
+        path=pending.pop()
+        if not path.is_file():
+            raise RuntimeError('刷机工具缺少依赖库 '+path.name)
+        if path in seen: continue
+        seen.add(path)
+        # otool -L includes a dylib's own install ID, which is not a dependency.
+        ids={s.strip() for s in run(['otool','-D',path]).splitlines()[1:]}
+        for line in run(['otool','-L',path]).splitlines()[1:]:
+            dep=line.strip().split(' (compatibility version',1)[0]
+            if dep in ids or dep.startswith(('/usr/lib/','/System/')): continue
+            if dep.startswith('@loader_path/'):
+                dep=str(path.parent/dep[len('@loader_path/'):])
+            target=Path(os.path.abspath(dep))
+            if not target.is_file():
+                raise RuntimeError('刷机工具缺少依赖库 '+target.name)
+            pending.append(target)
+    try:
+        run(['python3','-I','-c','import ctypes,sys; ctypes.CDLL(sys.argv[1])',libusb])
+    except RuntimeError as e:
+        raise RuntimeError('刷机工具依赖库加载失败 '+Path(libusb).name) from e
+
 def registry(args):
     return classified(parse_ioreg(run([args.ioreg,'-p','IOUSB','-w0','-l','-r','-c','IOUSBHostDevice'],3)))
 
@@ -146,8 +170,9 @@ def prepare(step,a):
     elif step==4:
         vendor=LOCAL/'update.vendor';download(TOOL_URL,vendor,TOOL_SHA)
         out=LOCAL/'update';run(['lipo','-thin','arm64',vendor,'-output',out])
-        lib=a.libusb or Path(run(['brew','--prefix','libusb-compat']).strip())/'lib/libusb-0.1.4.dylib'
+        lib=(a.libusb or Path(run(['brew','--prefix','libusb-compat']).strip())/'lib/libusb-0.1.4.dylib').absolute()
         run(['install_name_tool','-change','/opt/homebrew/opt/libusb-compat/lib/libusb-0.1.4.dylib',lib,out]);run(['codesign','--force','--sign','-',out]);out.chmod(0o700)
+        check_tool_libraries(out,lib)
         save('tool.json',{'sha256':sha(out)})
     elif step==5:
         g=registry(a)
