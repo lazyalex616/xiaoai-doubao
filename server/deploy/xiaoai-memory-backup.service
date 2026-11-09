@@ -1,0 +1,15 @@
+[Unit]
+Description=Encrypted XiaoAi SQLite backup (seven-day rotation)
+
+[Service]
+Type=oneshot
+User=xiaoai
+Group=xiaoai
+WorkingDirectory=/opt/xiaoai-memory
+EnvironmentFile=/etc/xiaoai-memory.env
+ExecStart=/opt/xiaoai-memory/.venv/bin/python -m server.backup backup --out /var/backups/xiaoai-memory
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/xiaoai /var/backups/xiaoai-memory

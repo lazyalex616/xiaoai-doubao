@@ -1,0 +1,22 @@
+[Unit]
+Description=XiaoAi text memory (single process and summary worker)
+After=network-online.target
+
+[Service]
+User=xiaoai
+Group=xiaoai
+WorkingDirectory=/opt/xiaoai-memory
+EnvironmentFile=/etc/xiaoai-memory.env
+EnvironmentFile=-/etc/xiaoai-memory/ark.env
+ExecStart=/opt/xiaoai-memory/.venv/bin/uvicorn server.app:from_environment --factory --host 127.0.0.1 --port 64100 --workers 1 --no-access-log --log-level warning
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/xiaoai
+
+[Install]
+WantedBy=multi-user.target

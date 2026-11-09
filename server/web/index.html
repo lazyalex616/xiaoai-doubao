@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#F5F1EA" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#211F1B" media="(prefers-color-scheme: dark)">
+  <title>豆包英语 · 家长端</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <form id="login" class="login">
+    <h1 class="login-mark">豆包英语</h1><p class="login-subtitle muted">家长端</p>
+    <div class="group login-fields">
+      <label class="row" for="household"><span>账号</span><input id="household" name="household" placeholder="输入账号" required autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+      <label class="row" for="password"><span>密码</span><input id="password" name="password" placeholder="输入密码" type="password" required autocomplete="current-password"></label>
+    </div>
+    <p id="login-error" class="error" role="alert" hidden></p>
+    <button class="primary" type="submit">登录</button>
+  </form>
+  <section id="content" hidden>
+    <section id="panel-home" class="panel">
+      <header class="home-heading"><div><h1 id="child-name" class="child-switch"></h1><p id="today-date" class="muted"></p></div><a href="#manage" class="manage-link">管理</a></header>
+      <p id="no-records" class="muted" hidden></p>
+      <div id="learning-content">
+        <section class="learning-section"><h2 id="latest-label" class="group-title"></h2><p id="latest-recap" class="recap"></p><p id="latest-meta" class="meta muted"></p></section>
+        <section id="expression" class="learning-section"></section>
+        <section class="learning-section week-section"><h2 class="group-title">这一周</h2><p id="week-total" class="week-total"></p><div id="week-chart" class="week-chart" aria-label="本周每日分钟"></div><div class="week-comparison muted"><span id="week-comparison"></span><span id="practice-streak"></span></div></section>
+        <section id="weekly-words" class="learning-section"><h2 class="group-title">这周聊过的词</h2><div id="word-groups"></div></section>
+        <section class="learning-section"><h2 class="group-title">聊天记录</h2><div id="records"></div><div id="history-end" aria-live="polite"></div></section>
+      </div>
+    </section>
+    <section id="panel-manage" class="panel" hidden>
+      <a href="#" class="back">‹ 返回</a><header class="page-heading"><h1>管理</h1></header>
+      <section class="section-group"><h2 class="group-title">孩子</h2><div id="manage-children" class="group lined"></div></section>
+      <section class="section-group"><h2 class="group-title">每日通知</h2><div class="group lined">
+        <label class="row switch-row" for="notification-enabled"><span>发到家庭微信群</span><span class="switch-control"><input id="notification-enabled" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"></span></span></label>
+        <label class="row" for="notification-time"><span>发送时间</span><input id="notification-time" type="time" required value="20:00"></label>
+        <div class="row"><span>家庭群</span><span id="notification-ready" class="muted"></span></div>
+      </div><p class="footnote">到点发一条到家庭群：练了多久、聊过哪些词。对话原文只在这里看。到点时还没有记录，当天就不发。</p></section>
+      <section class="section-group"><h2 class="group-title">账号</h2><div class="group lined"><button id="logout" class="row danger" type="button">退出登录</button></div></section>
+    </section>
+    <section id="panel-child" class="panel" hidden><a href="#manage" class="back">‹ 返回</a><header class="page-heading"><h1 id="profile-name"></h1></header><div id="profiles"></div></section>
+  </section>
+</main>
+<p id="message" class="toast" role="status" aria-live="polite" hidden></p>
+<dialog id="delete-dialog" class="sheet" aria-labelledby="delete-title" aria-describedby="delete-description">
+  <h2 id="delete-title">删除这次记录？</h2>
+  <p id="delete-description" class="muted">删除后不能恢复。</p>
+  <div class="dialog-actions"><button id="cancel-delete" class="secondary" type="button" autofocus>取消</button><button id="confirm-delete" class="danger" type="button">删除</button></div>
+</dialog>
+<dialog id="word-dialog" class="sheet word-sheet" aria-labelledby="enlarged-word">
+  <h2 id="enlarged-word" lang="en"></h2><button id="close-word" class="secondary" type="button" autofocus>关闭</button>
+</dialog>
+<dialog id="edit-dialog" class="sheet" aria-labelledby="edit-title">
+  <form id="edit-profile">
+    <h2 id="edit-title"></h2><label id="edit-label" class="sr-only" for="edit-value"></label>
+    <input id="edit-value" type="text" aria-describedby="edit-hint" autocomplete="off">
+    <p id="edit-hint" class="weak" aria-live="polite"></p><button class="primary" type="submit">保存</button>
+  </form>
+</dialog>
+<script src="/app.js" defer></script>
+</body>
+</html>

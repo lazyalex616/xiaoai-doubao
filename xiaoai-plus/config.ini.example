@@ -1,0 +1,64 @@
+[realtime]
+# Switch to v3 and restart speaker to roll back without replacing the binary.
+protocol = o2
+api_key = your_api_key
+# Store the real config.ini as mode 0600; never put a real key in this template.
+model = 1.2.6.1
+voice = zh_female_vv_jupiter_bigtts
+bot_name = 豆包
+system_role = 你是豆包同学，是小爱音箱上的语音助手。
+speaking_style = 语气自然、友好、简洁。
+
+[realtime.o2]
+end_smooth_window_ms = 2500
+voice = zh_female_vv_jupiter_bigtts
+
+[wakeup]
+# RMS automatic gain applies only to local KWS; cloud uplink is unchanged.
+kws_agc = on
+say_hello = 在
+# Use a separate, tested keyword file when experimenting with a new wake word.
+keywords_file = assets/keywords.txt
+s32_shift = 16
+input_channel = beamformed
+kws_threshold = 0.10
+# Keep two KWS inference threads: offline replay lost a positive-window hit with one.
+kws_num_threads = 2
+# Exit words need this score both while the answer is playing and while waiting.
+exit_playback_threshold = 0.45
+
+[conversation]
+# After each answer, keep the same cloud session open for the next utterance.
+# Idle timer restarts on user speech (ASR started) or when Doubao finishes playback.
+# Valid range: 1..900 seconds. No absolute session limit unless set below.
+idle_seconds = 30
+absolute_timeout_seconds = 0
+duplex_mode = half
+# 0 disables the local guard while keeping usage records.
+daily_token_limit = 0
+
+[audio]
+# Playback shares the system mysoftvol; 0.90 keeps PCM headroom without clipping.
+playback_gain = 0.90
+# Diagnostic only: save at most 5 seconds of decoded output to a private /tmp raw file.
+dump_output_audio_raw = 0
+
+[memory]
+# Enable only after server provisioning and authorized household validation.
+enabled = off
+server_url = https://xiaoai.example.invalid
+# Independent 64 hex characters, issued per device; never the speech API key.
+device_secret =
+cache_dir = /data/xiaoai-plus/memory
+# 填孩子的英文名，要和家长页档案里的昵称一致
+child_names = Amy, Ben
+# 留空会自动生成问句
+# identity_question = Hi! Are you Amy or Ben? Or a grown-up?
+# P5f temporary diagnostic, identity stage only, <=24 characters; turn off after P5d.
+identity_text_log = on
+
+[stop_key]
+# Read-only play/pause key listener. Leave unmapped until xiaoai_input_keys verifies it.
+# Both values are required to enable; native touchpad still receives the same press.
+device =
+key_code = -1

@@ -1,0 +1,12 @@
+{
+    servers {
+        protocols h1 h2
+    }
+}
+xiaoai.<domain> {
+    encode gzip
+    # Ubuntu Caddy 2.6: application middleware enforces the 300KiB body limit.
+    # Do not enable access logging of cookies, auth headers or text request bodies.
+    reverse_proxy 127.0.0.1:64100
+    header Strict-Transport-Security "max-age=31536000"
+}

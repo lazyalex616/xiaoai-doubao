@@ -1,0 +1,3 @@
+# Optional reproducible Linux host Debug harness (no device access).
+FROM xiaoai-plus-toolchain:dev
+RUN apt-get update && apt-get install -y --no-install-recommends libssl-dev:amd64 zlib1g-dev:amd64 && rm -rf /var/lib/apt/lists/*
