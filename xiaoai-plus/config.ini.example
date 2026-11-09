@@ -18,7 +18,7 @@ voice = zh_female_vv_jupiter_bigtts
 kws_agc = on
 say_hello = 在
 # Use a separate, tested keyword file when experimenting with a new wake word.
-keywords_file = assets/keywords.txt
+keywords_file = keywords/keywords_doubao_repeat_end.txt
 s32_shift = 16
 input_channel = beamformed
 kws_threshold = 0.10
@@ -54,7 +54,7 @@ cache_dir = /data/xiaoai-plus/memory
 child_names = Amy, Ben
 # 留空会自动生成问句
 # identity_question = Hi! Are you Amy or Ben? Or a grown-up?
-# P5f temporary diagnostic, identity stage only, <=24 characters; turn off after P5d.
+# Log only short identity-stage diagnostics (up to 24 characters).
 identity_text_log = on
 
 [stop_key]

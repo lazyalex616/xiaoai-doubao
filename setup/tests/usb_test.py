@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Offline subprocess tests: only generated fake ioreg/update executables are used."""
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import unittest
+
+class USBTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
+        shutil.copytree(Path(__file__).resolve().parents[1],self.root/'setup',ignore=shutil.ignore_patterns('__pycache__','tests'))
+        self.local=self.root/'.local';self.local.mkdir();(self.local/'extracted').mkdir()
+        boot=b'ANDROID!'+struct.pack('<10I',0,0,0,0,0,0,0,2048,0,0)
+        boot+=b'\0'*(2560-len(boot))
+        (self.local/'extracted/boot.img.encrypt').write_bytes(boot)
+        (self.local/'extracted/root.squashfs').write_bytes(b'STOCK')
+        (self.local/'root-patched.squashfs').write_bytes(b'PATCH')
+        (self.local/'patch.json').write_text(json.dumps({'sha256':hashlib.sha256(b'PATCH').hexdigest()}))
+        self.mode='ok';self.write('mode','ok')
+        self.ioreg=self.root/'ioreg';self.update=self.root/'update'
+        self.ioreg.write_text('''#!/usr/bin/env python3
+from pathlib import Path
+r=Path(__file__).parent
+n=int((r/'count').read_text()) if (r/'count').exists() else 0
+(r/'count').write_text(str(n+1))
+m=(r/'mode').read_text()
+def emit(port,vid,pid):
+ print('+-o Device@'+port+' <class IOUSBHostDevice>')
+ print('  "idVendor" = '+str(vid));print('  "idProduct" = '+str(pid))
+if m=='two':
+ emit('abc001',0x2717,0xd002);emit('abc002',0x2717,0xd002)
+elif n==0:emit('abc001',0x2717,0xd002)
+else:emit('abc002' if m=='wrong' else 'abc001',0x1b8e,0xc003)
+''')
+        self.update.write_text('''#!/usr/bin/env python3
+from pathlib import Path
+import sys
+r=Path(__file__).parent;a=sys.argv[1:];m=(r/'mode').read_text()
+with (r/'calls').open('a') as f:f.write(' '.join(a)+'\\n')
+if a[0]=='identify':print('This firmware version is fake')
+elif a[0]=='bulkcmd':
+ c=a[1].strip();ok=c=='test 1 = 1' or ('boot0' in c and m!='boot1') or ('boot1' in c and m=='boot1')
+ print('bulkInReply success' if ok else 'failed')
+elif a[0]=='mread':
+ part=a[2];size=int(a[4],16)
+ if part.startswith('boot'):data=(r/'.local/extracted/boot.img.encrypt').read_bytes()
+ elif (r/'written').exists():data=b'WRONG' if m=='mismatch' else b'PATCH'
+ else:data=b'STOCK'
+ if m=='backup_mismatch' and a[5].endswith('.2.bin'):data=b'BAD'+data[3:]
+ Path(a[5]).write_bytes((data+b'\\0'*size)[:size])
+elif a[0]=='partition':(r/'written').touch()
+elif a[0]=='reset':(r/'reset').touch()
+''')
+        for p in (self.ioreg,self.update):p.chmod(0o700)
+        (self.local/'tool.json').write_text(json.dumps({'sha256':hashlib.sha256(self.update.read_bytes()).hexdigest()}))
+    def tearDown(self):self.tmp.cleanup()
+    def write(self,n,s):(self.root/n).write_text(s)
+    def run_step(self,step,*args,ok=True):
+        cmd=[sys.executable,str(self.root/'setup/firmware.py'),str(step),'--ioreg',str(self.ioreg),'--update',str(self.update),*args]
+        p=subprocess.run(cmd,capture_output=True,text=True)
+        self.assertEqual(p.returncode==0,ok,p.stdout+p.stderr)
+        self.assertTrue(p.stdout.splitlines()[-2].startswith('OK:' if ok else 'STOP:'),p.stdout)
+        self.assertTrue(p.stdout.splitlines()[-1].startswith('NEXT:'),p.stdout)
+        return p
+    def backup(self):
+        self.run_step(5,'--execute');self.run_step(6,'--execute')
+    def test_success(self):
+        self.backup();self.run_step(7,'--i-accept-brick-risk');self.assertTrue((self.root/'reset').exists())
+        calls=(self.root/'calls').read_text();self.assertEqual(calls.count('partition system0'),1);self.assertEqual(calls.count('reset'),1)
+    def test_two_normal(self):self.write('mode','two');self.run_step(5,'--execute',ok=False)
+    def test_wrong_port(self):self.write('mode','wrong');self.run_step(5,'--execute',ok=False)
+    def test_boot1(self):
+        self.backup();self.write('mode','boot1');self.run_step(7,'--i-accept-brick-risk',ok=False);self.assertFalse((self.root/'written').exists())
+    def test_readback_mismatch(self):
+        self.backup();self.write('mode','mismatch');self.run_step(7,'--i-accept-brick-risk',ok=False);self.assertFalse((self.root/'reset').exists())
+    def test_backup_mismatch(self):
+        self.run_step(5,'--execute');self.write('mode','backup_mismatch');self.run_step(6,'--execute',ok=False)
+        self.assertFalse((self.root/'reset').exists())
+    def test_dry_run(self):
+        self.run_step(7);self.assertFalse((self.root/'calls').exists());self.assertFalse((self.root/'count').exists())
+    def test_reset_only(self):
+        self.run_step(5,'--execute');self.run_step(7,'--reset-only','--execute');self.assertTrue((self.root/'reset').exists());self.assertFalse((self.root/'written').exists())
+
+if __name__=='__main__':unittest.main()

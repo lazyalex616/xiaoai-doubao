@@ -21,3 +21,5 @@ __pycache__/
 *.crt
 *.tar.*
 xiaoai-plus/assets/tokens.txt
+
+.local/

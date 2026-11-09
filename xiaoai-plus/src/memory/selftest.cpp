@@ -20,8 +20,8 @@ realtime::duplex::Event Text(const char* type,const char* text,const char* id,
   realtime::duplex::Event e; e.type=type;e.text=text;e.event_id=id;e.item_id=item;
   e.response_id=response;e.question_id=question;return e;
 }
-Json Amy(const Json& snap) {
-  for(const auto& c:snap.at("children"))if(c.at("profile").at("name")=="Amy")return c;
+Json FindChild(const Json& snap, const std::string& name) {
+  for(const auto& c:snap.at("children"))if(c.at("profile").at("name")==name)return c;
   throw std::runtime_error("selftest_child_missing");
 }
 }
@@ -32,10 +32,12 @@ int Selftest(config::Memory cfg,Transport transport,std::ostream& out,int summar
   std::mutex upload_mu;
   try {
     Require(cfg.enabled);
+    if(cfg.child_names.empty()) { out<<"selftest_child_missing\n"; return 1; }
+    const auto& child_name=cfg.child_names.front();
     if(cfg.identity_question.empty())cfg.identity_question=IdentityQuestion(cfg.child_names);
     auto health=transport("/health",Json());Require(health.status==200 && health.body.value("status","")=="ok");
     auto snap=transport("/device/snapshot",Json());Require(snap.status==200);
-    const auto child=Amy(snap.body);
+    const auto child=FindChild(snap.body,child_name);
     out<<"SELFTEST_HEALTH_PASS\n"<<std::flush;
     cache=cfg.cache_dir+"-selftest-XXXXXX";
     std::vector<char> name(cache.begin(),cache.end());name.push_back(0);
@@ -67,10 +69,10 @@ int Selftest(config::Memory cfg,Transport transport,std::ostream& out,int summar
       Require(action(0).greeting==cfg.identity_question && action(0).instructions.find(IdentityInstructions(cfg.child_names))==0);
       out<<"SELFTEST_IDENTITY_QUESTION_PASS\n"<<std::flush;
       Require(svc.Activate(1));
-      Require(svc.Event(1,Text("conversation.item.input_audio_transcription.completed","Amy","identity","identity-item")));
+      Require(svc.Event(1,Text("conversation.item.input_audio_transcription.completed",child_name.c_str(),"identity","identity-item")));
       Require(Wait([&]{return count()==2;},10));
-      Require(!action(1).greeting.empty() && action(1).after_reply && action(1).instructions.find("Amy")!=std::string::npos);
-      out<<"SELFTEST_AMY_PROFILE_INSTRUCTIONS_PASS\n"<<std::flush;
+      Require(!action(1).greeting.empty() && action(1).after_reply && action(1).instructions.find(child_name)!=std::string::npos);
+      out<<"SELFTEST_CHILD_PROFILE_INSTRUCTIONS_PASS\n"<<std::flush;
       Require(svc.Activate(1));
       Require(svc.Event(1,Text("conversation.item.input_audio_transcription.completed",
         "[SYNTHETIC P5c2 test, not a real child conversation] I drew a Triceratops with three horns. What does herbivore mean?",
@@ -83,7 +85,7 @@ int Selftest(config::Memory cfg,Transport transport,std::ostream& out,int summar
         std::string id;{std::lock_guard<std::mutex> l(upload_mu);id=server_sid;}
         if(id.empty())return false;
         auto r=transport("/device/snapshot",Json());if(r.status!=200)return false;
-        const auto amy=Amy(r.body);
+        const auto amy=FindChild(r.body,child_name);
         for(const auto& s:amy.at("summaries"))if(s.value("session_id","")==id) {
           Require(s.value("status","")=="ark-v1");return true;
         }
@@ -92,7 +94,7 @@ int Selftest(config::Memory cfg,Transport transport,std::ostream& out,int summar
       const auto revision=svc.cache_revision();Require(svc.Prefetch());
       Require(Wait([&]{return svc.cache_revision()>revision;},30));
       Require(svc.Begin(2));Require(Wait([&]{return count()==3;},10));Require(svc.Activate(2));
-      Require(action(2).greeting=="Hi Amy, want to continue?" && action(2).instructions.find("Untrusted recent recap:")!=std::string::npos);
+      Require(action(2).greeting=="Hi "+child_name+", want to continue?" && action(2).instructions.find("Untrusted recent recap:")!=std::string::npos);
       Require(svc.End(2));svc.Stop();
       out<<"SELFTEST_SUMMARY_RESUME_PASS\n"<<std::flush;
     }

@@ -11,9 +11,9 @@
 #include "memory/selftest.hpp"
 using namespace xiaoai_plus;
 using memory::Json;
-int main() {
+int main(int argc, char** argv) {
   char dir[]="/tmp/memory-selftest-test-XXXXXX";assert(mkdtemp(dir));
-  config::Memory cfg;cfg.child_names={"Amy","Ben"};cfg.identity_question=memory::IdentityQuestion(cfg.child_names);cfg.enabled=true;cfg.cache_dir=std::string(dir)+"/memory";
+  config::Memory cfg;cfg.child_names={argc>1?argv[1]:"Amy",argc>2?argv[2]:"Ben"};cfg.identity_question=memory::IdentityQuestion(cfg.child_names);cfg.enabled=true;cfg.cache_dir=std::string(dir)+"/memory";
   std::mutex mu;Json uploaded;int attempts=0;int summary_reads=0;bool deleted=false;
   std::ostringstream output;
   auto transport=[&](const std::string& path,const Json& body)->memory::Reply {
@@ -24,7 +24,7 @@ int main() {
       Json summaries=Json::array();
       if(!uploaded.is_null() && !deleted)summaries.push_back({{"session_id",uploaded["session_id"]},{"status","ark-v1"},{"recap","Synthetic dinosaur drawing."},{"resume_question","Which plant?"}});
       return {200,{{"generation",deleted?2:1},{"expires_at",std::time(nullptr)+86400},{"children",Json::array({
-        Json{{"id","amy"},{"profile",{{"name","Amy"},{"aliases",Json::array({"Amy"})}}},{"version",1},{"summaries",summaries}}})}}};
+        Json{{"id","test-child"},{"profile",{{"name",cfg.child_names.front()},{"aliases",Json::array({cfg.child_names.front()})}}},{"version",1},{"summaries",summaries}}})}}};
     }
     if(path=="/device/ack")return {200,{{"ok",true}}};
     assert(path=="/device/sessions");
@@ -37,6 +37,9 @@ int main() {
   assert(attempts==1);assert(output.str().find("SELFTEST_PASS")!=std::string::npos);
   assert(output.str().find("three horns")==std::string::npos);
   assert(rmdir(dir)==0);
+  cfg.child_names.clear();std::ostringstream missing;
+  assert(memory::Selftest(cfg,transport,missing,1,1)==1);
+  assert(missing.str().find("selftest_child_missing")!=std::string::npos);
   cfg.enabled=false;std::ostringstream disabled;
   assert(memory::Selftest(cfg,transport,disabled,1,1)==1);
   assert(attempts==1);
