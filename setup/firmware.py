@@ -161,8 +161,11 @@ def prepare(step,a):
             if g['worldcup']:
                 snapshot(a,port)
                 # Persist only after identify, keeping filesystem I/O out of the short window.
-                p=subprocess.run([str(a.update),'identify','7'],capture_output=True,timeout=8)
-                if p.returncode or b'This firmware version is' not in p.stdout or b'ERR' in p.stdout or b'fail' in p.stdout.lower(): raise RuntimeError('identify failed; no retry')
+                p=subprocess.run([str(a.update),'identify','7'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=8)
+                with (LOCAL/'identify.log').open('ab') as log:
+                    os.fchmod(log.fileno(),0o600)
+                    log.write(p.stdout)
+                if not (p.returncode==0 and b'This firmware version is' in p.stdout and b'ERR' not in p.stdout and b'No [WorldCup' not in p.stdout): raise RuntimeError('identify failed; no retry')
                 snapshot(a,port);save('usb.json',{'port':port});return
             if g['normal'] and g['normal'][0]['location']!=port: raise RuntimeError('normal USB changed port; GitHub提Issue')
             time.sleep(.1)

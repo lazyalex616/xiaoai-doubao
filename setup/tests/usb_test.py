@@ -48,7 +48,12 @@ from pathlib import Path
 import sys
 r=Path(__file__).parent;a=sys.argv[1:];m=(r/'mode').read_text()
 with (r/'calls').open('a') as f:f.write(' '.join(a)+'\\n')
-if a[0]=='identify':print('This firmware version is fake')
+if a[0]=='identify':
+ print('This firmware version is fake',file=sys.stderr if m=='identify_stderr' else sys.stdout)
+ if m=='identify_err':print('ERR: identify')
+ if m=='identify_no_worldcup':print('No [WorldCup device]')
+ if m=='identify_fail':print('fail')
+ if m=='identify_nonzero':sys.exit(1)
 elif a[0]=='bulkcmd':
  c=a[1].strip()
  if c=='reset':
@@ -83,6 +88,24 @@ elif a[0]=='partition':(r/'written').touch()
         self.backup();self.run_step(7,'--i-accept-brick-risk');self.assertTrue((self.root/'reset').exists())
         calls=(self.root/'calls').read_text();self.assertEqual(calls.count('partition system0'),1);self.assertEqual(calls.count('reset'),1)
     def test_two_normal(self):self.write('mode','two');self.run_step(5,'--execute',ok=False)
+    def test_identify_output_and_log(self):
+        for mode,ok,raw in (
+            ('identify_stderr',True,b'This firmware version is fake\n'),
+            ('identify_err',False,b'This firmware version is fake\nERR: identify\n'),
+            ('identify_no_worldcup',False,b'This firmware version is fake\nNo [WorldCup device]\n'),
+            ('identify_fail',True,b'This firmware version is fake\nfail\n'),
+            ('identify_nonzero',False,b'This firmware version is fake\n'),
+        ):
+            with self.subTest(mode=mode):
+                self.write('mode',mode)
+                (self.root/'count').unlink(missing_ok=True)
+                (self.local/'usb.json').unlink(missing_ok=True)
+                log=self.local/'identify.log'
+                log.write_bytes(b'previous\n');log.chmod(0o644)
+                self.run_step(5,'--execute',ok=ok)
+                self.assertEqual(log.read_bytes(),b'previous\n'+raw)
+                self.assertEqual(log.stat().st_mode & 0o777,0o600)
+                self.assertEqual((self.local/'usb.json').exists(),ok)
     def test_wrong_port(self):self.write('mode','wrong');self.run_step(5,'--execute',ok=False)
     def test_boot1(self):
         self.backup();self.write('mode','boot1');self.run_step(7,'--i-accept-brick-risk',ok=False);self.assertFalse((self.root/'written').exists())

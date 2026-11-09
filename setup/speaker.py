@@ -54,7 +54,7 @@ def discovery(a):
             if m and ':'.join(x.zfill(2) for x in m[2].split(':'))==wanted:matches.append(m[1])
         if len(matches)!=1: raise RuntimeError('MAC没有唯一IP；确认同Wi-Fi、非蓝牙模式')
         a.host=matches[0]
-    scan=run(['ssh-keyscan','-p',str(a.port),a.host]).encode()
+    scan=run(['ssh-keyscan','-t','rsa','-p',str(a.port),a.host]).encode()
     if not scan.strip(): raise RuntimeError('SSH host key missing')
     host=a.host if a.port==22 else '['+a.host+']:'+str(a.port)
     if a.known_hosts.exists():
