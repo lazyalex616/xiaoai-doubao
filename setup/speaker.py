@@ -113,10 +113,15 @@ def content(a,package):
     shutil.copyfile(config(a),stage/'config.ini');(stage/'config.ini').chmod(0o600)
     return stage
 
+def log_scope(offset):
+    log=APP+'/xiaoai_plus.log'
+    return ('if [ -f '+log+' ]; then if [ "$(wc -c < '+log+')" -lt '+str(offset)+
+            ' ]; then cat '+log+'; else tail -c +'+str(offset+1)+' '+log+'; fi; fi')
+
 def wait_ready(a, offset):
     end=time.monotonic()+35
     while time.monotonic()<end:
-        text=ssh(a,'if [ -f '+APP+'/xiaoai_plus.log ]; then tail -c +'+str(offset+1)+' '+APP+'/xiaoai_plus.log; fi')
+        text=ssh(a,log_scope(offset))
         if 'app components started' in text and 'kws keywords: 1 wake, 6 exit' in text:
             return
         time.sleep(1)
@@ -146,7 +151,7 @@ def install(a):
     offset=int(ssh(a,'if [ -f '+APP+'/xiaoai_plus.log ]; then wc -c < '+APP+'/xiaoai_plus.log; else echo 0; fi').strip())
     ssh(a,'nohup '+APP+'/boot.sh </dev/null >/dev/null 2>&1 &')
     wait_ready(a,offset)
-    result=ssh(a,"set -eu; test -f "+APP+"/xiaoai_plus.log; pidof xiaoai_plus_speaker; pidof mipns-xiaomi; if tail -c +"+str(offset+1)+" "+APP+"/xiaoai_plus.log | grep -Ei 'error|fatal' >/dev/null; then exit 1; fi")
+    result=ssh(a,"set -eu; test -f "+APP+"/xiaoai_plus.log; pidof xiaoai_plus_speaker; pidof mipns-xiaomi; if { "+log_scope(offset)+"; } | grep -Ei 'error|fatal' >/dev/null; then exit 1; fi")
     if len(result.splitlines())<2: raise RuntimeError('speaker/native process missing')
     # Process ticks over wall time measure a full 3-minute idle window; SSH only reads /proc.
     def ticks():
