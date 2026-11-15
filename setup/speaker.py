@@ -20,7 +20,7 @@ import time
 from firmware import LOCAL, ROOT, download, sha, StatusParser
 
 PACKAGE_SHA = '34629b02148219eed88eb1662b50c13ff7c221b176a3fb0231eec38c770704d5'
-PACKAGE_SIZE = 10275677
+PACKAGE_SIZE = 10287484
 PACKAGE_URL = 'https://github.com/rolazd/xiaoai-doubao/releases/download/v0.1.0/xiaoai-doubao-oh2p-v0.1.0.tar.gz'
 MODEL_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2'
 MODEL_SHA = '68447f4fbc67e70eee3a93961f36e81e98f47aef73ce7e7ca00885c6cd3616a6'
