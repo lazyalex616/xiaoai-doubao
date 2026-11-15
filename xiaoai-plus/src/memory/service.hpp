@@ -20,6 +20,7 @@ struct Action {
   bool exit{false};
   uint64_t identity_revision{0};
   bool after_reply{false};
+  int start_failures{0};
 };
 struct ResumeIdentity {
   uint64_t epoch{0}, revision{0}, cache_revision{0};

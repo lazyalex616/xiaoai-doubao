@@ -34,7 +34,11 @@ int main() {
   c=encode(session.Greeting("Is that Amy or Ben?"));assert(c.event_id==EventId::kSayHello);
   assert(c.JsonPayload()["content"]=="Is that Amy or Ben?");
   receive(450,{{"question_id","q1"}});
-  receive(451,{{"results",J::array({{{"text","我是 Amy"},{"is_interim",false}}})}});
+  e=receive(451,{{"results",J::array({{{"text","我是 Amy"},{"is_interim",false}}})}});
+  assert(e.size()==1 && session.Receive(e[0]).type=="conversation.item.input_audio_transcription.delta");
+  assert(session.Receive(e[0]).text=="我是 Amy");
+  c=encode(R"({"type":"input_audio_buffer.commit"})");
+  assert(c.event_id==EventId::kEndAsr && c.session_id==sid && c.JsonPayload()==J::object());
   e=receive(459);assert(e.size()==1);auto asr=session.Receive(e.at(0));
   assert(asr.type=="conversation.item.input_audio_transcription.completed" && asr.text=="我是 Amy" && asr.item_id=="q1");
   e=receive(459);assert(e.size()==1);
@@ -63,6 +67,15 @@ int main() {
   assert(session.Receive(e.at(0)).exit_intent);
   c=encode(session.Close());assert(c.event_id==EventId::kFinishSession);
   e=receive(152);assert(session.Receive(e.at(0)).type=="session.closed");
+  const std::string quota="quota exceeded for types: tokens_lifetime";
+  const auto payload=J{{"error",quota}}.dump();
+  std::vector<uint8_t> rejected={0x11,0xf0,0x10,0x00};
+  auto u32=[&](uint32_t n){for(int shift=24;shift>=0;shift-=8)rejected.push_back(n>>shift);};
+  u32(45000292);u32(payload.size());rejected.insert(rejected.end(),payload.begin(),payload.end());
+  e=wire.Receive({rejected.begin(),rejected.end()});assert(e.size()==1);
+  assert(J::parse(e[0])["message"]==quota);
+  const auto error=session.Receive(e[0]);
+  assert(error.type=="error" && error.error_code==45000292 && error.text==quota);
   bool failed=false;try{wire.Receive("bad");}catch(...){failed=true;}assert(failed);
   std::cout<<"O2 codec/event mapping, identity text, usage and canceled residual fence PASS\n";
 }

@@ -12,6 +12,7 @@
 #include <string>
 #include <thread>
 #include <sys/wait.h>
+#include <sys/ioctl.h>
 #include <system_error>
 #include <unistd.h>
 #include <vector>
@@ -237,6 +238,44 @@ void AplayPlayer::ClosePipeLocked(bool kill_now) {
   }
 }
 
+void AplayPlayer::WaitAudible(uint64_t generation) {
+  using Clock = std::chrono::steady_clock;
+  const auto began = Clock::now();
+  const auto deadline = began + std::chrono::seconds(3);
+  auto tail_deadline = deadline;
+  bool empty = false;
+  int first_bytes = -1;
+  const auto tail = std::chrono::milliseconds(
+      200 + 1000 * cfg_.buffer_size / std::max(1, cfg_.sample_rate));
+  while (Clock::now() < deadline) {
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      if (!queue_.empty() || generation != Generation() || !running_.load()) break;
+    }
+    {
+      std::lock_guard<std::mutex> lock(pipe_mu_);
+      if (aplay_fd_ < 0 || pipe_generation_ != generation) break;
+      if (!empty) {
+        int bytes = 0;
+        if (ioctl(aplay_fd_, FIONREAD, &bytes) < 0) {
+          kLog->warn("player audible ioctl failed errno={}", errno);
+          break;
+        }
+        if (first_bytes < 0) first_bytes = bytes;
+        if (bytes == 0) { empty = true; tail_deadline = Clock::now() + tail; }
+      }
+    }
+    if (empty && Clock::now() >= tail_deadline) break;
+    // Play/Interrupt/Close wake the wait without holding any pipe or callback lock.
+    std::unique_lock<std::mutex> lock(mu_);
+    cv_.wait_for(lock, std::chrono::milliseconds(10), [&] {
+      return !queue_.empty() || generation != Generation() || !running_.load();
+    });
+  }
+  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-began).count();
+  if (ms >= 200) kLog->info("playback audible wait_ms={} pipe_bytes={}", ms, first_bytes);
+}
+
 void AplayPlayer::WriteLoop() {
   // Aplay may exit between spawn and write. Keep EPIPE local to this writer
   // instead of letting SIGPIPE terminate the paid-session process.
@@ -359,6 +398,7 @@ void AplayPlayer::WriteLoop() {
 
     {std::lock_guard<std::mutex> lock(mu_);writing_=false;}cv_.notify_all();
     if(!item.notify)continue;
+    if(write_ok && !canceled)WaitAudible(item.generation);
     std::function<void(bool)> cb;
     {
       std::lock_guard<std::mutex> lock(cb_mu_);

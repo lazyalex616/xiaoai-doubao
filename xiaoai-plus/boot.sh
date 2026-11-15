@@ -75,7 +75,8 @@ if [ -f "${PID_FILE}" ]; then
   case "${old_pid}" in
     ''|*[!0-9]*) echo "错误：守护 PID 文件无效" >&2; exit 1 ;;
   esac
-  if kill -0 "${old_pid}" 2>/dev/null; then
+  if kill -0 "${old_pid}" 2>/dev/null &&
+    tr '\0' ' ' < "/proc/${old_pid}/cmdline" 2>/dev/null | grep -q 'xiaoai-plus/boot.sh'; then
     echo "守护进程已运行：${old_pid}"
     exit 0
   fi

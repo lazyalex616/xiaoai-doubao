@@ -307,6 +307,8 @@ Event Session::Receive(const std::string& json_text) {
     const auto* detail = &msg;
     if (msg.contains("error") && msg["error"].is_object()) detail = &msg["error"];
     event.error_code = ErrorCode(*detail);
+    if (detail->contains("message") && (*detail)["message"].is_string())
+      event.text = (*detail)["message"].get<std::string>();
     if (msg.contains("X-Tt-Logid") && msg["X-Tt-Logid"].is_string())
       event.log_id = msg["X-Tt-Logid"].get<std::string>();
     else if (detail->contains("X-Tt-Logid") && (*detail)["X-Tt-Logid"].is_string())

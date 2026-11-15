@@ -228,6 +228,10 @@ void Config::validate(bool memory_only) const {
     throw std::runtime_error("stop_key.device must be /dev/input/event followed by a node number");
   if (stop_key.key_code < -1 || stop_key.key_code == 0 || stop_key.key_code > 767)
     throw std::runtime_error("stop_key.key_code must be -1 (disabled) or 1..767");
+  if(conversation.smart_turn_complete_ms<300 || conversation.smart_turn_complete_ms>10000)
+    throw std::runtime_error("conversation.smart_turn_complete_ms must be 300..10000");
+  if(conversation.smart_turn_open_ms<300 || conversation.smart_turn_open_ms>20000)
+    throw std::runtime_error("conversation.smart_turn_open_ms must be 300..20000");
   if (conversation.idle_seconds < 1 || conversation.idle_seconds > 900) {
     throw std::runtime_error("conversation.idle_seconds must be 1..900");
   }
@@ -349,6 +353,11 @@ Config load(const std::string& path, bool memory_only) {
 
     if (auto it = sections.find("conversation"); it != sections.end()) {
       const auto& kv = it->second;
+      if(auto v=kv.find("smart_turn");v!=kv.end()) {
+        if(v->second=="on")cfg.conversation.smart_turn=true;
+        else if(v->second=="off")cfg.conversation.smart_turn=false;
+        else throw std::runtime_error("conversation.smart_turn must be on or off");
+      }
       if(auto v=kv.find("ordinary_barge_in");v!=kv.end()) {
         if(v->second=="on")cfg.conversation.ordinary_barge_in=true;
         else if(v->second=="off")cfg.conversation.ordinary_barge_in=false;
@@ -366,6 +375,8 @@ Config load(const std::string& path, bool memory_only) {
       }
       for (const auto& [key, target] :
            {std::pair<const char*, int*>{"idle_seconds", &cfg.conversation.idle_seconds},
+            {"smart_turn_complete_ms", &cfg.conversation.smart_turn_complete_ms},
+            {"smart_turn_open_ms", &cfg.conversation.smart_turn_open_ms},
             {"absolute_timeout_seconds", &cfg.conversation.absolute_timeout_seconds},
             {"barge_processing_io_delay_hint_ms", &cfg.conversation.barge_processing_io_delay_hint_ms}}) {
         if (auto value = kv.find(key); value != kv.end()) {

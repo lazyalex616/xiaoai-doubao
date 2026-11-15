@@ -540,6 +540,7 @@ void Service::Process(const Command& c){
   }
   if(c.kind!=2 || transitioning_ || (transport_mode_ && !c.envelope.valid() && !(c.identity_origin.valid() && c.identity_origin==legacy_identity_origin_)) || !conversational_)return;
   if(c.event.type=="conversation.item.input_audio_transcription.completed") {
+    if(identity_.kind()=="unknown" && identity_.IsQuestionTail(c.event.text))return;
     if(!c.event.event_id.empty()) {
       if(identity_events_.count(c.event.event_id)) return;
       if(identity_events_.size()<512) identity_events_.insert(c.event.event_id);

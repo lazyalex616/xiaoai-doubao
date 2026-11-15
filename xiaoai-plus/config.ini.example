@@ -10,15 +10,16 @@ system_role = 你是豆包同学，是小爱音箱上的语音助手。
 speaking_style = 语气自然、友好、简洁。
 
 [realtime.o2]
-end_smooth_window_ms = 2500
+# smart_turn 开时云端窗口只作兜底
+end_smooth_window_ms = 6000
 voice = zh_female_vv_jupiter_bigtts
 
 [wakeup]
 # RMS automatic gain applies only to local KWS; cloud uplink is unchanged.
 kws_agc = on
-say_hello = 在
+say_hello = Hi! I'm Doubao. Story or riddle?
 # Use a separate, tested keyword file when experimenting with a new wake word.
-keywords_file = keywords/keywords_doubao_repeat_end.txt
+keywords_file = /data/xiaoai-plus/keywords/keywords_doubao_repeat_end.txt
 s32_shift = 16
 input_channel = beamformed
 kws_threshold = 0.10
@@ -32,6 +33,9 @@ exit_playback_threshold = 0.45
 # Idle timer restarts on user speech (ASR started) or when Doubao finishes playback.
 # Valid range: 1..900 seconds. No absolute session limit unless set below.
 idle_seconds = 30
+smart_turn = on
+smart_turn_complete_ms = 1500
+smart_turn_open_ms = 4500
 absolute_timeout_seconds = 0
 duplex_mode = half
 # 0 disables the local guard while keeping usage records.

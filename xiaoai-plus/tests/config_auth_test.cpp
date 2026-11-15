@@ -281,5 +281,13 @@ int main() {
   assert(rejected);
   std::remove(bad_parent_path.c_str());
   rmdir(dirname);
+  for(const auto& value : {std::string("smart_turn = yes"),std::string("smart_turn_complete_ms = 299"),
+      std::string("smart_turn_open_ms = 20001"),std::string("smart_turn_open_ms = -1")}) {
+    {std::ofstream out(path);out<<"[realtime]\napi_key = test-only-key\n[conversation]\n"<<value<<"\n";}
+    rejected=false;try{(void)xiaoai_plus::config::load(path);}catch(...){rejected=true;}assert(rejected);
+  }
+  {std::ofstream out(path);out<<"[realtime]\napi_key = test-only-key\n[conversation]\nsmart_turn = on\nsmart_turn_complete_ms = 300\nsmart_turn_open_ms = 20000\n";}
+  auto smart=xiaoai_plus::config::load(path).conversation;
+  assert(smart.smart_turn && smart.smart_turn_complete_ms==300 && smart.smart_turn_open_ms==20000);
   std::remove(path.c_str());
 }

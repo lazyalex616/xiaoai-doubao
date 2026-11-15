@@ -30,6 +30,7 @@ class Client {
     std::function<void(const std::vector<uint8_t>&)> on_audio;
     std::function<void()> on_audio_done;
     std::function<void(bool)> on_set_ai_speaking;
+    std::function<void(const duplex::Event&)> on_asr_turn;
     std::function<void(const std::string&)> on_asr_final;
     std::function<void()> on_asr_empty;
     std::function<void()> on_user_activity;
@@ -63,6 +64,7 @@ class Client {
   // For native VPM speech segments: send a turn boundary only after all
   // preceding audio frames have been sent in order.
   bool EndInputTurn();
+  bool CommitUserTurn();
   bool SendSayHello(const std::string& override_text = "");
   void SetPlaybackActive(bool active, bool interrupted = false);
   void RecoverStalledPlayback();
@@ -230,9 +232,11 @@ class Client {
     TransportEnvelope envelope;
     CapturedInput captured;
     int fresh_control{0}; // 1 mute, 2 end input, 3 unmute; sender is sole writer.
+    bool smart_commit{false};
   };
   std::deque<AudioItem> audio_queue_;
   size_t audio_queue_bytes_{0};
+  bool user_turn_open_{false}, user_turn_committed_{false}; // state_mu_
 };
 
 }  // namespace xiaoai_plus::realtime

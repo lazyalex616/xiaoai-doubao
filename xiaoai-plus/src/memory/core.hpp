@@ -19,6 +19,7 @@ std::string BuildInstructions(const Json& child = Json::object(), const std::str
                               const std::string& recent = "", bool short_resume = false, const std::vector<std::string>& names = {});
 std::string IdentityQuestion(const std::vector<std::string>& names);
 Json SeedNames(const std::vector<std::string>& names);
+std::string PlaymateInstructions(const std::vector<std::string>& names);
 std::string IdentityInstructions(const std::vector<std::string>& names = {});
 struct Candidate { std::string child_id; double confidence{0}; };
 struct Decision { bool changed{false}; std::string kind; std::string child_id; std::string greeting; };
@@ -32,6 +33,7 @@ class Identity {
   void UpdateChildren(Json children) { children_ = std::move(children); }
   Decision Hear(const std::string& text, Candidate candidate = {});
   std::string Rule(const std::string& text) const;
+  bool IsQuestionTail(const std::string& text) const;
   const std::string& kind() const { return kind_; }
   const std::string& child_id() const { return child_id_; }
   const std::string& question() const { return question_; }

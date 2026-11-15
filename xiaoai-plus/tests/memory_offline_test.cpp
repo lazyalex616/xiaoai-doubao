@@ -79,6 +79,10 @@ int main() {
  memory::Identity unicode_prompt("请告诉我你叫什么名字");unicode_prompt.Reset(Children());
  assert(unicode_prompt.Hear("诉我你叫什么名字 我是Ben").child_id=="ben");
  unicode_prompt.Reset(Children());assert(unicode_prompt.Hear("叫什么名字 我是Ben").child_id=="ben");
+ memory::Identity tail_probe(memory::IdentityQuestion({"Amy","Ben"}));
+ for(const char* text:{"up","Or a grown up i am amy","Or a grown up going up."})assert(!tail_probe.IsQuestionTail(text));
+ tail_probe.Reset(Children());assert(tail_probe.Hear("Or a grown up i am amy").child_id=="amy");
+ tail_probe.Reset(Children());assert(!tail_probe.Hear("Or a grown up going up.").greeting.empty());
  memory::Identity identity(memory::IdentityQuestion({"Amy","Ben"}));identity.Reset(Children());assert(identity.Hear("Amy").child_id=="amy");
  assert(!identity.Hear("A story about Ben").changed);assert(identity.Hear("No, I'm Ben").child_id=="ben");
  assert(identity.Hear("我是爸爸").kind=="adult");
@@ -146,15 +150,15 @@ int main() {
  auto child=Children()[0];child["profile"]["interests"]=std::string(10000,'x');child["summaries"]=Json::array();
  for(int i=0;i<8;i++)child["summaries"].push_back({{"recap",std::string(5000,'y')},{"resume_question",std::string(2000,'z')}});
  auto instructions=memory::BuildInstructions(child);assert(instructions.size()<=memory::kInstructionsBudget);assert(instructions.find("SAFETY FIRST")!=std::string::npos);
- assert(memory::Redact("email me at a\100b.com or 13812345678").find("a\100b.com")==std::string::npos);
+ assert(memory::Redact("email me at a@b.com or 13812345678").find("a@b.com")==std::string::npos);
  assert(memory::Redact("我住在北京路123号。").find("北京路")==std::string::npos);
  config::Config off;assert(!off.memory.enabled);realtime::duplex::Session legacy;auto original=Json::parse(legacy.Create("old","voice"));assert(!original["session"].contains("extension"));
  char dir[]="/tmp/xiaoai-memory-test-XXXXXX";assert(mkdtemp(dir));
  config::Memory cfg;cfg.child_names={"Amy","Ben"};cfg.identity_question=memory::IdentityQuestion(cfg.child_names);cfg.enabled=true;cfg.cache_dir=dir;
  std::mutex mu;std::vector<memory::Action> actions;std::vector<Json> uploads;
- std::atomic<int> calls{0}, gen{0};std::atomic<bool> unreachable{false}, slow{false};
+ std::atomic<int> calls{0}, gen{0}, identity_calls{0};std::atomic<bool> unreachable{false}, slow{false};
  memory::Service service(cfg,[&](const std::string& path,const Json& body)->memory::Reply {
-  ++calls;
+  ++calls;if(path=="/device/identity")++identity_calls;
   if(slow)std::this_thread::sleep_for(std::chrono::milliseconds(200));
   if(unreachable)return {};
   if(path=="/device/snapshot")return {200,{{"generation",gen.load()},{"expires_at",std::time(nullptr)+86400},{"children",Children()}}};
@@ -163,7 +167,14 @@ int main() {
  },[&](memory::Action a){std::lock_guard<std::mutex> l(mu);actions.push_back(a);});
  service.Start();Wait([&]{return service.cache_revision()>0;});assert(service.Begin(1));
  auto count=[&]{std::lock_guard<std::mutex> l(mu);return actions.size();};Wait([&]{return count()>=1;});
- assert(service.Activate(1));assert(service.Event(1,Text(user,"Amy","identity")));Wait([&]{return count()>=2;});
+ assert(service.Activate(1));
+ for(const char* tail:{"Or a grown up.","Or grown up.","Ben? Or a grown-up?"}) {
+   memory::Identity probe(memory::IdentityQuestion({"Amy","Ben"}));assert(probe.IsQuestionTail(tail));
+   assert(service.Event(1,Text(user,tail,tail)));
+   std::this_thread::sleep_for(std::chrono::milliseconds(100));
+   assert(count()==1 && identity_calls.load()==0);
+ }
+ assert(service.Event(1,Text(user,"I am Amy.","identity")));Wait([&]{return count()>=2;});
  assert(service.Activate(1));assert(service.Event(1,asr));assert(service.Event(1,final));assert(service.End(1));
  Wait([&]{std::lock_guard<std::mutex> l(mu);return uploads.size()==1;});
  {std::lock_guard<std::mutex> l(mu);assert(uploads[0]["child_id"]=="amy");assert(uploads[0]["turns"].size()==2);}

@@ -2,6 +2,7 @@
 #include "audio/session_cue.hpp"
 #include "audio/volume.hpp"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -50,6 +51,13 @@ class App {
   Lifecycle State() const;
 
  private:
+  void RecordUplinkLevel(const std::vector<uint8_t>& pcm);
+  void UplinkLevelEvent(int event); // 0 ready/reset, 1 started, 2 terminal
+  std::mutex uplink_level_mu_;
+  std::array<double,3000> uplink_levels_{};
+  size_t uplink_level_count_{0}, uplink_samples_{0};
+  double uplink_square_sum_{0}, uplink_peak_{0}, uplink_floor50_{0}, uplink_floor90_{0};
+  bool uplink_measuring_{false}, uplink_turn_{false};
   friend struct AppOfflineProbe;
   static void ConvertS32ToS16(const std::vector<uint8_t>& chunk, std::vector<uint8_t>* out,
                               int shift);
@@ -144,6 +152,13 @@ class App {
   std::unique_ptr<audio::shadow::WebrtcVoiceDetector> barge_vad_;
   std::unique_ptr<audio::OrdinaryBargeCapture> barge_capture_;
   std::recursive_mutex transport_effect_mu_;
+  void OnSmartTurn(const realtime::duplex::Event& event);
+  void CheckSmartTurn();
+  bool smart_turn_active_{false}, smart_turn_sent_{false};
+  std::string smart_turn_text_;
+  std::vector<std::string> smart_turn_words_;
+  std::chrono::steady_clock::time_point smart_turn_changed_;
+  int64_t smart_turn_quiet_ms_{0};
   std::atomic<bool> legacy_effects_live_{true};
   std::atomic<bool> capture_healthy_{false};
   uint64_t healthy_capture_generation_{0};

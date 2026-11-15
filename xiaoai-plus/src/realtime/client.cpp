@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include "common/log.hpp"
+#include "memory/core.hpp"
 
 namespace xiaoai_plus::realtime {
 namespace {
@@ -47,10 +48,10 @@ const char* PhaseName(duplex::State state) {
   }
   return "unknown";
 }
-std::string SafeField(const std::string& value) {
-  if (value.empty() || value.size() > 64) return "unavailable";
+std::string SafeField(const std::string& value, bool message = false) {
+  if (value.empty() || value.size() > (message ? 100 : 64)) return "unavailable";
   for (unsigned char c : value)
-    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+    if (message ? (c < 32 || c == 127) : !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
           (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.'))
       return "unavailable";
   return value;
@@ -136,6 +137,7 @@ bool Client::StartSession(std::chrono::milliseconds timeout, const std::string& 
     if (scoped_barge_control_) barge_.BeginSession(barge_epoch_, capture_generation_);
     ai_speaking_ = false;
     close_notified_ = false;
+    user_turn_open_=false;user_turn_committed_=false;
     output_format_.Reset();
     format_probe_blocks_ = 0;
     first_output_delta_logged_ = false;
@@ -174,6 +176,8 @@ bool Client::StartSession(std::chrono::milliseconds timeout, const std::string& 
                         "Usually 2 short sentences, never more than 3; a fun sound like \"Roar!\" doesn't count. At most one question, only at the end. "
                         "During children's English practice, be natural and encouraging. "
                         "Preserve the required identity question and continuation opening.";
+      if(instructions_override.empty() && !cfg_.memory.enabled && cfg_.realtime.protocol=="o2")
+        instructions = memory::PlaymateInstructions(cfg_.memory.child_names);
       create = session_.Create(instructions, cfg_.realtime.preset.voice, cfg_.memory.enabled);
     }
     sent = SendTextLocked(create);
@@ -316,6 +320,15 @@ bool Client::EnqueueAudioBound(const BargeInController::Token& token, std::vecto
   audio_queue_.push_back(AudioItem{std::move(chunk), false, token});
   audio_cv_.notify_one();
   return true;
+}
+
+bool Client::CommitUserTurn() {
+  std::lock_guard<std::mutex> state(state_mu_);
+  if(cfg_.realtime.protocol!="o2" || session_.state()!=duplex::State::kActive ||
+     !user_turn_open_ || user_turn_committed_)return false;
+  std::lock_guard<std::mutex> queue(audio_mu_);
+  AudioItem item;item.smart_commit=true;audio_queue_.push_back(std::move(item));
+  user_turn_committed_=true;audio_cv_.notify_one();return true;
 }
 
 bool Client::EndInputTurn() {
@@ -958,6 +971,7 @@ void Client::HandleText(const std::string& text,const IdentitySessionOrigin& ori
     }
     if (!effects_allowed) event.exit_intent = false;
     if (effects_allowed && event.type == "conversation.item.input_audio_transcription.started") {
+      user_turn_open_=true;user_turn_committed_=false;
       was_speaking = ai_speaking_;
     }
     if (effects_allowed && event.type == "response.output_audio.delta" && !event.audio.empty()) {
@@ -1045,6 +1059,14 @@ void Client::HandleText(const std::string& text,const IdentitySessionOrigin& ori
         (cfg_.conversation.duplex_mode == "full" || !was_speaking))
       callbacks_.on_user_activity();
   }
+  if(event.type.rfind("conversation.item.input_audio_transcription.",0)==0) {
+    if(event.type=="conversation.item.input_audio_transcription.completed" ||
+       event.type=="conversation.item.input_audio_transcription.ended_empty" ||
+       event.type=="conversation.item.input_audio_transcription.failed") {
+      std::lock_guard<std::mutex> lock(state_mu_);user_turn_open_=false;
+    }
+    if(callbacks_.on_asr_turn)callbacks_.on_asr_turn(event);
+  }
   if (event.type == "conversation.item.input_audio_transcription.completed" &&
       callbacks_.on_asr_final) callbacks_.on_asr_final(event.text);
   if (event.type == "conversation.item.input_audio_transcription.ended_empty" ||
@@ -1094,13 +1116,15 @@ void Client::HandleText(const std::string& text,const IdentitySessionOrigin& ori
   if (event.type == "session.closed") NotifyClosed("session_finished");
   if (event.type == "error") {
     const bool idle_release = event.error_code == 45000003;
+    const std::string message = std::string(event_phase)=="awaiting_created" ?
+      " message="+SafeField(event.text.substr(0,100),true) : "";
     if (idle_release)
-      kLog->info("duplex idle release phase={} error_code=45000003 X-Tt-Logid={}",
-                 event_phase, SafeField(event.log_id));
+      kLog->info("duplex idle release phase={} error_code=45000003 X-Tt-Logid={}{}",
+                 event_phase, SafeField(event.log_id), message);
     else
-      kLog->error("duplex server event=error phase={} error_code={} X-Tt-Logid={}",
+      kLog->error("duplex server event=error phase={} error_code={} X-Tt-Logid={}{}",
                   event_phase, event.error_code ? std::to_string(*event.error_code) : "unavailable",
-                  SafeField(event.log_id));
+                  SafeField(event.log_id), message);
     NotifyClosed(idle_release ? "server_idle_release" : "server_error");
     RequestCleanup();
   }
@@ -1255,6 +1279,16 @@ void Client::SendLoop() {
       framer.Reset();
       muted = false;
       segment_has_audio = false;
+      continue;
+    }
+    if(have_item && item.smart_commit) {
+      const auto tail=framer.FlushWithSilence();
+      if(!tail.empty() && !SendAudioFrame(tail,framer_token)) {
+        HandleConnectionLost("audio_send_failed",true);continue;
+      }
+      std::lock_guard<std::mutex> write(write_mu_);
+      if(!SendTextLocked(R"({"type":"input_audio_buffer.commit"})"))
+        HandleConnectionLost("input_commit_failed",true);
       continue;
     }
     if (SuppressInput()) {

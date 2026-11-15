@@ -46,6 +46,7 @@ std::string Session::Encode(const std::string& event,const config::Realtime& cfg
         {"speaking_style","Cheerful, playful big buddy for young kids. English only. Slow, clear, simple words. Usually 2 short sentences, never more than 3; a fun sound like \"Roar!\" doesn't count. At most one question, only at the end."},
         {"extra",extra}}}});
   }
+  if(type=="input_audio_buffer.commit")return Json(E::kEndAsr,J::object());
   if(type=="session.close")return Json(E::kFinishSession,J::object());
   if(type=="speech_text_buffer.commit")return Json(E::kSayHello,{{"content",msg.at("text")}});
   if(type=="response.cancel") {
@@ -64,7 +65,9 @@ std::vector<std::string> Session::Receive(const std::string& binary) {
   if(id==50){connected_=true;return {};}
   if(f.error_code || id==51 || id==153 || id==599) {
     auto body=f.JsonPayload();
-    return {J{{"type","error"},{"code",f.error_code?J(*f.error_code):body.value("status_code",J(nullptr))}}.dump()};
+    J error={{"type","error"},{"code",f.error_code?J(*f.error_code):body.value("status_code",J(nullptr))}};
+    if(body.contains("error") && body["error"].is_string())error["message"]=body["error"];
+    return {error.dump()};
   }
   if(id==150)return {J{{"type","session.created"},{"session",{{"id",session_id_}}}}.dump()};
   if(id==152)return {J{{"type","session.closed"}}.dump()};
@@ -80,7 +83,10 @@ std::vector<std::string> Session::Receive(const std::string& binary) {
     emit("conversation.item.input_audio_transcription.started");
   } else if(id==451) {
     if(body.contains("results"))for(const auto& result:body["results"])
-      if(result.contains("text"))asr_=result.at("text").get<std::string>();
+      if(result.contains("text")) {
+        asr_=result.at("text").get<std::string>();
+        emit("conversation.item.input_audio_transcription.delta",{{"delta",asr_}});
+      }
   } else if(id==459) {
     if(!asr_.empty())emit("conversation.item.input_audio_transcription.completed",{{"item_id",question_},{"transcript",asr_}});
     else emit("conversation.item.input_audio_transcription.ended_empty",{{"item_id",question_}});

@@ -83,6 +83,8 @@ struct BudgetPreset {
 struct ConversationPreset {
   // Time to wait for the next user turn after the assistant finishes speaking.
   int idle_seconds{30};
+  bool smart_turn{false};
+  int smart_turn_complete_ms{1500}, smart_turn_open_ms{4500};
   int absolute_timeout_seconds{0};  // 0: no absolute session limit
   std::string duplex_mode{"half"};
   uint64_t daily_token_limit{0};  // 0: no limit; usage is still recorded

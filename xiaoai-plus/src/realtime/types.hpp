@@ -38,6 +38,7 @@ enum class EventId : uint32_t {
   kSessionFailed = 153,
 
   kTaskRequest = 200,
+  kEndAsr = 400,
   kSayHello = 300,
 
   kTtsResponse = 352,

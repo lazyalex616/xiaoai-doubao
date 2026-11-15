@@ -219,6 +219,9 @@ std::string Redact(std::string text) {
   text=std::regex_replace(text,english,"[private]");
   return std::regex_replace(text,chinese,"[private]");
 }
+std::string PlaymateInstructions(const std::vector<std::string>& names) {
+  return Safety(names)+"No memory here: you don't know which child is talking and have no past chats. Never pretend to remember; if you need a name, ask once.";
+}
 std::string IdentityInstructions(const std::vector<std::string>& names) {
   return Safety(names)+"App asks identity and retries once if unclear; never independently re-ask or guess. Until an explicit registered name/adult self-ID, chat as guest with no child profile/history. App handles corrections; never reuse the previous speaker's memory.";
 }
@@ -274,6 +277,13 @@ std::string BuildInstructions(const Json& child, const std::string& identity,
 }
 Identity::Identity(std::string question, Resolver resolver):question_(std::move(question)),resolver_(std::move(resolver)) {}
 void Identity::Reset(Json children) {children_=std::move(children);kind_="unknown";child_id_.clear();attempt_=0;}
+bool Identity::IsQuestionTail(const std::string& raw) const {
+  const auto text=Normalize(raw);
+  if(text.empty())return false;
+  if(EchoLength(text,question_)==text.size())return true;
+  // ASR also drops the article in "Or a grown-up".
+  return text=="orgrownup" && EchoLength("oragrownup",question_)==10;
+}
 std::string Identity::Rule(const std::string& raw) const {
   bool explicit_report=false;const auto text=SelfReport(raw,explicit_report,children_,question_);
   if(Adult(text))return "adult";

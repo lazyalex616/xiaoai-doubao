@@ -34,7 +34,7 @@ class AplayPlayer {
   void SetOnScopedChunkProcessed(std::function<void(uint64_t, ChunkResult)> cb);
   void Close();
 
-  // Called after a queued chunk is written or dropped because the player failed.
+  // Called after a chunk and its audible tail drain, or it fails; queued audio skips the wait.
   void SetOnChunkProcessed(std::function<void(bool)> cb);
   void SetOnWriteProgress(std::function<void()> cb);
   void SetOnFatal(std::function<void()> cb);
@@ -43,6 +43,7 @@ class AplayPlayer {
   bool OpenPipeLocked();
   void ClosePipeLocked(bool kill_now);
   void WriteLoop();
+  void WaitAudible(uint64_t generation);
 
   config::Audio cfg_;
   int queue_frames_{128};

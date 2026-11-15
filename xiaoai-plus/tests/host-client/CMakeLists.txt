@@ -278,6 +278,9 @@ get_property(all_host_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(t IN LISTS all_host_targets)
   get_target_property(sources ${t} SOURCES)
   if("${sources}" MATCHES "realtime/client.cpp")
+    if(NOT "${sources}" MATCHES "memory/core.cpp")
+      target_sources(${t} PRIVATE "${REPO}/src/memory/core.cpp")
+    endif()
     target_sources(${t} PRIVATE "${REPO}/src/realtime/o2_protocol.cpp" "${REPO}/src/realtime/frame_codec.cpp")
     target_link_libraries(${t} PRIVATE ZLIB::ZLIB)
   endif()
@@ -289,7 +292,7 @@ target_include_directories(o2_protocol_test PRIVATE "${REPO}/src")
 target_link_libraries(o2_protocol_test PRIVATE nlohmann_json::nlohmann_json spdlog::spdlog ZLIB::ZLIB)
 add_test(NAME o2_protocol_test COMMAND o2_protocol_test)
 
-add_executable(o2_client_offline_test ../o2_client_offline_test.cpp
+add_executable(o2_client_offline_test ../o2_client_offline_test.cpp "${REPO}/src/memory/core.cpp"
   "${REPO}/src/realtime/client.cpp" "${REPO}/src/realtime/daily_usage.cpp"
   "${REPO}/src/realtime/duplex_protocol.cpp" "${REPO}/src/realtime/o2_protocol.cpp"
   "${REPO}/src/realtime/frame_codec.cpp" "${REPO}/src/config/config.cpp")
@@ -300,3 +303,8 @@ add_test(NAME o2_client_offline_test COMMAND o2_client_offline_test)
 add_executable(volume_control_test ../volume_control_test.cpp)
 target_include_directories(volume_control_test PRIVATE "${REPO}/src")
 add_test(NAME volume_control_test COMMAND volume_control_test)
+
+add_executable(player_audible_drain_test ../player_audible_drain_test.cpp "${REPO}/src/audio/player_aplay.cpp")
+target_include_directories(player_audible_drain_test PRIVATE "${REPO}/src")
+target_link_libraries(player_audible_drain_test PRIVATE spdlog::spdlog Threads::Threads)
+add_test(NAME player_audible_drain_test COMMAND player_audible_drain_test)

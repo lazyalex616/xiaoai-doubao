@@ -67,7 +67,7 @@ bool SayRepeatBounded(const std::string& message) {
   posix_spawnattr_destroy(&attr);
   if(rc || pid<=0) {kLog->warn("repeat speech spawn failed");return true;}
   bool reaped=false;
-  const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+  const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);
   while(std::chrono::steady_clock::now()<deadline) {
     int status=0;const pid_t result=waitpid(pid,&status,WNOHANG);
     if(result==pid || (result<0 && errno==ECHILD))reaped=true;
@@ -79,6 +79,7 @@ bool SayRepeatBounded(const std::string& message) {
   // Kill only the private process group created for this feedback. Do not
   // leave a background descendant audible after suppression is released.
   if(kill(-pid,0)==0)(void)kill(-pid,SIGKILL);
+  kLog->warn("repeat speech killed at bound");
   for(int i=0;i<50;++i) {
     if(!reaped) {const auto result=waitpid(pid,nullptr,WNOHANG);if(result==pid || (result<0 && errno==ECHILD))reaped=true;}
     if(reaped && kill(-pid,0)!=0 && errno==ESRCH)return true;
@@ -309,8 +310,12 @@ App::App(config::Config cfg, bool kws_only, bool trial_once, bool kws_diagnostic
   realtime::Client::Callbacks callbacks;
   callbacks.on_audio = [this](const std::vector<uint8_t>& chunk) { std::lock_guard<std::recursive_mutex> fence(transport_effect_mu_); if(legacy_effects_live_.load())OnAudio(chunk); };
   callbacks.on_set_ai_speaking = [this](bool speaking) { std::lock_guard<std::recursive_mutex> fence(transport_effect_mu_); if(legacy_effects_live_.load())OnSetAiSpeaking(speaking); };
+  callbacks.on_asr_turn = [this](const realtime::duplex::Event& event) {
+    std::lock_guard<std::recursive_mutex> fence(transport_effect_mu_);
+    if(legacy_effects_live_.load())OnSmartTurn(event);
+  };
   callbacks.on_asr_final = [this](const std::string& text) { std::lock_guard<std::recursive_mutex> fence(transport_effect_mu_); if(legacy_effects_live_.load())OnAsrFinal(text); };
-  callbacks.on_asr_empty = [this]() { std::lock_guard<std::recursive_mutex> fence(transport_effect_mu_); if(legacy_effects_live_.load())gate_->SetUserTurnOpen(false); };
+  callbacks.on_asr_empty = [this]() { std::lock_guard<std::recursive_mutex> fence(transport_effect_mu_); if(legacy_effects_live_.load()){UplinkLevelEvent(2);gate_->SetUserTurnOpen(false);} };
   callbacks.on_user_activity = [this]() { std::lock_guard<std::recursive_mutex> fence(transport_effect_mu_); if(legacy_effects_live_.load())OnUserActivity(); };
   callbacks.on_session_closed = [this](const std::string& reason) { std::lock_guard<std::recursive_mutex> fence(transport_effect_mu_); if(legacy_effects_live_.load())OnSessionClosed(reason); };
   callbacks.on_chat_ended = [this]() { std::lock_guard<std::recursive_mutex> fence(transport_effect_mu_); if(legacy_effects_live_.load())OnChatEnded(); };
@@ -872,6 +877,9 @@ void App::OnFreshEvent(const realtime::TransportEnvelope& envelope,const realtim
   }
   if(gate_->step()!=wakeup::Step::kActive || memory_switching_.load() ||
      (native_wake_monitor_ && native_wake_monitor_->Blocked()))return;
+  if(event.type=="conversation.item.input_audio_transcription.started")UplinkLevelEvent(1);
+  if(event.type=="conversation.item.input_audio_transcription.ended_empty" ||
+     event.type=="conversation.item.input_audio_transcription.failed")UplinkLevelEvent(2);
   if(event.type=="response.output_audio.started" || event.type=="response.output_audio.delta") {
     {std::lock_guard<std::mutex> lock(barge_mu_);fresh_granted_=false;fresh_output_started_=true;barge_pcm_.clear();}
     (void)fresh_client_->PauseFreshInput(envelope,"output_started");
@@ -1271,11 +1279,46 @@ void App::OnInputAudio(const std::vector<uint8_t>& chunk) {
       }
     }
 
+    RecordUplinkLevel(*api_audio);
     if (api_audio == &owned_audio) {
       client_->EnqueueAudio(std::move(owned_audio));
     } else {
       client_->EnqueueAudio(*api_audio);
     }
+    CheckSmartTurn();
+  }
+}
+
+void App::OnSmartTurn(const realtime::duplex::Event& event) {
+  if(cfg_.realtime.protocol!="o2" || !cfg_.conversation.smart_turn)return;
+  const auto now=std::chrono::steady_clock::now();
+  const auto suffix=event.type.substr(event.type.rfind('.')+1);
+  if(suffix=="started") {
+    smart_turn_active_=true;smart_turn_sent_=false;smart_turn_text_.clear();
+    smart_turn_words_.clear();smart_turn_changed_=now;smart_turn_quiet_ms_=0;
+  } else if(smart_turn_active_ && suffix=="delta") {
+    const auto words=ConversationWords(event.text);
+    if(words!=smart_turn_words_) {smart_turn_words_=words;smart_turn_changed_=now;}
+    smart_turn_text_=event.text;
+  } else if(smart_turn_active_ && (suffix=="completed" || suffix=="ended_empty" || suffix=="failed")) {
+    const auto quiet=smart_turn_sent_?smart_turn_quiet_ms_:
+      std::chrono::duration_cast<std::chrono::milliseconds>(now-smart_turn_changed_).count();
+    kLog->info("user turn end by={} quiet_ms={} words={} open={}",
+      smart_turn_sent_?"smart":"server",quiet,smart_turn_words_.size(),LooksUnfinished(smart_turn_text_)?1:0);
+    smart_turn_active_=false;
+  }
+}
+
+void App::CheckSmartTurn() {
+  std::unique_lock<std::recursive_mutex> fence(transport_effect_mu_, std::try_to_lock);
+  if(!fence.owns_lock())return;
+  if(cfg_.realtime.protocol!="o2" || !cfg_.conversation.smart_turn ||
+     !legacy_effects_live_.load() || !smart_turn_active_ || smart_turn_sent_)return;
+  const auto quiet=std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now()-smart_turn_changed_).count();
+  if(ShouldCommitTurn(smart_turn_text_,quiet,cfg_.conversation.smart_turn_complete_ms,
+      cfg_.conversation.smart_turn_open_ms) && client_->CommitUserTurn()) {
+    smart_turn_sent_=true;smart_turn_quiet_ms_=quiet;
   }
 }
 
@@ -1440,6 +1483,7 @@ void App::OnSetAiSpeaking(bool is_speaking) {
 }
 
 void App::OnAsrFinal(const std::string& text) {
+  UplinkLevelEvent(2);
   {std::lock_guard<std::mutex> lock(mu_);reply_pending_=true;}
   if(cfg_.memory.identity_text_log && identity_pending_.load() && !memory_switching_.load() &&
      gate_ && gate_->step()==wakeup::Step::kActive)
@@ -1465,6 +1509,7 @@ void App::OnAsrFinal(const std::string& text) {
 }
 
 void App::OnUserActivity() {
+  UplinkLevelEvent(1);
   if(barge_capture_) {if(gate_->step()==wakeup::Step::kActive)gate_->RefreshTimeout();return;}
   if (cfg_.conversation.duplex_mode == "half") {
     std::lock_guard<std::mutex> lock(mu_);
@@ -1602,10 +1647,44 @@ void App::MaybeStartNextTurnWindow() {
     }
   }
   if (ready && gate_ && gate_->step() == wakeup::Step::kActive) {
+    UplinkLevelEvent(0);
     gate_->RefreshTimeout();
     kLog->info("ready for next user turn; idle_window_seconds={}",
                cfg_.conversation.idle_seconds);
   }
+}
+
+void App::RecordUplinkLevel(const std::vector<uint8_t>& pcm) {
+  std::lock_guard<std::mutex> lock(uplink_level_mu_);
+  if(!uplink_measuring_)return;
+  const size_t frame_samples=std::max(1,cfg_.audio.sample_rate/50);
+  for(size_t i=0;i+1<pcm.size();i+=2) {
+    const int16_t sample=static_cast<int16_t>(static_cast<uint16_t>(pcm[i]) |
+                                           (static_cast<uint16_t>(pcm[i+1])<<8));
+    uplink_square_sum_+=double(sample)*sample;
+    uplink_peak_=std::max(uplink_peak_,std::abs(double(sample)));
+    if(++uplink_samples_==frame_samples) {
+      if(uplink_level_count_<uplink_levels_.size())
+        uplink_levels_[uplink_level_count_++]=std::sqrt(uplink_square_sum_/frame_samples);
+      uplink_samples_=0;uplink_square_sum_=0;
+    }
+  }
+}
+void App::UplinkLevelEvent(int event) {
+  std::lock_guard<std::mutex> lock(uplink_level_mu_);
+  std::sort(uplink_levels_.begin(),uplink_levels_.begin()+uplink_level_count_);
+  const auto percentile=[&](size_t p) {
+    return uplink_level_count_ ? uplink_levels_[(uplink_level_count_-1)*p/100] : 0.0;
+  };
+  if(event==1) {
+    if(uplink_turn_)return;
+    uplink_floor50_=percentile(50);uplink_floor90_=percentile(90);
+  }else if(event==2 && uplink_turn_) {
+    kLog->info("uplink level turn frames={} rms_p10={:.1f} rms_p50={:.1f} rms_p90={:.1f} peak={:.1f} floor_p50={:.1f} floor_p90={:.1f}",
+      uplink_level_count_,percentile(10),percentile(50),percentile(90),uplink_peak_,uplink_floor50_,uplink_floor90_);
+  }
+  uplink_level_count_=0;uplink_samples_=0;uplink_square_sum_=0;uplink_peak_=0;
+  uplink_turn_=event==1;uplink_measuring_=event!=2;
 }
 
 void App::OnArm(const std::string& reason) {OnArm(reason,KwsTicket{});}
@@ -1780,6 +1859,12 @@ void App::ControlLoop() {
         const realtime::IdentitySessionOrigin identity_origin(memory_action->epoch,memory_action->identity_revision,++identity_session_sequence_);
         if (!client_->StartSession(std::chrono::seconds(12),memory_action->instructions,barge_capture_ ? identity_origin : realtime::IdentitySessionOrigin{})) {
           if(gate_->step()==wakeup::Step::kActive && !stopping_.load()) {
+            if(++memory_action->start_failures>=2) {
+              memory_switching_.store(false);
+              {std::lock_guard<std::mutex> lock(control_mu_);rephrase_requested_=true;rephrase_text_="豆包连不上了，请告诉爸爸妈妈。";}
+              kLog->warn("session unavailable after {} attempts",memory_action->start_failures);
+              gate_->Disarm("session_unavailable");control_cv_.notify_one();continue;
+            }
             std::unique_lock<std::mutex> lock(control_mu_);
             control_cv_.wait_for(lock,std::chrono::seconds(1),[&]{return control_stop_ || close_requested_ || start_requested_;});
             memory_actions_.push_back(std::move(*memory_action));control_cv_.notify_one();continue;

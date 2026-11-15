@@ -39,13 +39,25 @@ class ControlledEngine final:public wakeup::IKwsEngine {
 template<class F> void Wait(F f){for(int i=0;i<600 && !f();++i)std::this_thread::sleep_for(10ms);assert(f());}
 namespace xiaoai_plus::app {
 struct AppOfflineProbe {
- static void Run(const std::string& dir,const std::string& mode,int port,std::atomic<int>& sessions) {
+ static void Run(const std::string& dir,const std::string& mode,int port,std::atomic<int>& sessions,std::atomic<int>& greetings) {
   config::Config cfg;cfg.realtime.protocol="v3";cfg.conversation.ordinary_barge_in=mode!="legacy";
-  const bool with_memory=mode=="positive-control" || mode=="native-queue";
+  const bool session_failure=mode=="session-unavailable" || mode=="session-retry-success";
+  const bool with_memory=mode=="positive-control" || mode=="native-queue" || session_failure;
   cfg.memory.enabled=with_memory;cfg.memory.cache_dir=dir+"/memory";cfg.conversation.usage_dir=dir+"/usage";
   cfg.realtime.api_key="loopback-only";cfg.realtime.preset.ws_url="ws://127.0.0.1:"+std::to_string(port);
   App app(cfg,false,false,false,cfg.wakeup.s32_shift,cfg.wakeup.input_channel);
   auto engine=std::make_shared<ControlledEngine>();app.kws_listener_->Close();
+  std::atomic<bool> disarmed{false};std::string disarm_reason,requested_rephrase;
+  if(session_failure) {
+    app.gate_->Close();wakeup::Hooks hooks;
+    hooks.on_arm=[&](const std::string& reason){app.OnArm(reason);};
+    hooks.after_disarm_scoped=[&](const std::string& reason,uint64_t revision){
+      {std::lock_guard<std::mutex> l(app.control_mu_);
+        if(app.rephrase_requested_)requested_rephrase=app.rephrase_text_;}
+      app.AfterDisarmScoped(reason,revision);disarm_reason=reason;disarmed=true;
+    };
+    app.gate_=std::make_unique<wakeup::Gate>(30s,hooks);
+  }
   wakeup::LocalListener::Config lc;lc.gate=app.gate_.get();lc.trigger=app.trigger_.get();lc.kws_engine=engine;
   lc.sample_rate=16000;lc.min_trigger_interval_ms=0;lc.allow_playback_interrupt=true;lc.bounded_decisions=true;
   lc.on_end=[]{};app.kws_listener_=std::make_unique<wakeup::LocalListener>(lc);
@@ -97,10 +109,22 @@ struct AppOfflineProbe {
      app.OnNativeWake();app.control_thread_=std::thread([&]{app.ControlLoop();});
      Wait([&]{std::lock_guard<std::mutex> l(app.control_mu_);return !app.close_requested_ && !app.start_requested_;});
      std::this_thread::sleep_for(120ms);assert(app.memory_epoch_==0 && sessions==0 && !app.memory_switching_);
-   } else if(mode=="positive-control") {
+   } else if(mode=="positive-control" || session_failure) {
      app.control_thread_=std::thread([&]{app.ControlLoop();});
+     if(mode=="session-unavailable") {
+       Wait([&]{return disarmed.load();});
+       assert(disarm_reason=="session_unavailable" && requested_rephrase=="豆包连不上了，请告诉爸爸妈妈。");
+       assert(app.gate_->step()==wakeup::Step::kIdle && !app.memory_switching_ && !app.session_ready_);
+       std::this_thread::sleep_for(1300ms);assert(sessions==2 && greetings==0);
+       app.Stop();std::cout<<"PASS two rejected creates disarm session_unavailable, request parent feedback, no further creates\n";return;
+     }
      Wait([&]{return app.session_ready_.load() && !app.memory_switching_.load();});
-     assert(app.memory_epoch_==1 && sessions==1 && app.identity_pending_ && app.gate_->step()==wakeup::Step::kActive);
+     if(session_failure) {
+       Wait([&]{return greetings==1;});std::this_thread::sleep_for(1300ms);
+       assert(sessions==2 && !disarmed && requested_rephrase.empty());
+       {std::lock_guard<std::mutex> l(app.control_mu_);assert(!app.rephrase_requested_);}
+     }
+     assert(app.memory_epoch_==1 && sessions==(session_failure?2:1) && app.identity_pending_ && app.gate_->step()==wakeup::Step::kActive);
    }
    std::cout<<"PASS "<<mode<<" unknown epoch0 actual OnArm SessionStart enqueue preserved across 650ms preparation; sessions="<<sessions<<" epoch="<<app.memory_epoch_<<" staleDisarm="<<bool(old)<<"\n";
   } else if(mode=="native-hook" || mode=="stop-hook") {
@@ -135,12 +159,20 @@ int main(int argc,char** argv) {
  {std::ofstream f(dir+"/arecord");f<<"#!/usr/bin/env python3\nimport sys,time,os\nb=bytes(1440*16)\nwhile True:\n if os.path.exists('"<<dir<<"/producer-eof'): break\n sys.stdout.buffer.write(b);sys.stdout.buffer.flush();time.sleep(.09)\n";}
  assert(chmod((dir+"/arecord").c_str(),0700)==0);const std::string path=getenv("PATH");assert(setenv("PATH",(dir+":"+path).c_str(),1)==0);
  {std::ofstream f(dir+"/aplay");f<<"#!/usr/bin/env python3\nimport os\nwhile os.read(0,4096): pass\n";}assert(chmod((dir+"/aplay").c_str(),0700)==0);
- const int port=ix::getFreePort();std::atomic<int> sessions{0};ix::WebSocketServer server(port,"127.0.0.1");
+ const std::string mode=argv[1];
+ const int port=ix::getFreePort();std::atomic<int> sessions{0},greetings{0};ix::WebSocketServer server(port,"127.0.0.1");
  server.setOnClientMessageCallback([&](auto,ix::WebSocket& ws,const ix::WebSocketMessagePtr& m){
   if(m->type!=ix::WebSocketMessageType::Message)return;auto j=memory::Json::parse(m->str);const std::string type=j.at("type");
-  if(type=="session.create") {++sessions;assert(j.dump().find("Only ask who is speaking")!=std::string::npos || j.dump().find("Identity is unknown")!=std::string::npos);ws.sendText(R"({"type":"session.created","session":{"id":"local-initial-unknown"}})");}
+  if(type=="session.create") {
+   const int attempt=++sessions;
+   assert(j.dump().find("Only ask who is speaking")!=std::string::npos || j.dump().find("Identity is unknown")!=std::string::npos ||
+     ((mode=="session-unavailable" || mode=="session-retry-success") && j.dump().find("App asks identity")!=std::string::npos));
+   if(mode=="session-unavailable" || (mode=="session-retry-success" && attempt==1))
+     ws.sendText(R"({"type":"error","code":45000292,"message":"quota exceeded for types: tokens_lifetime"})");
+   else ws.sendText(R"({"type":"session.created","session":{"id":"local-initial-unknown"}})");
+  }
   if(type=="session.finish")ws.sendText(R"({"type":"session.closed"})");
-  if(type=="speech_text_buffer.commit") {ws.sendText(R"({"type":"response.output_audio.delta","event_id":"a","question_id":"q","response_id":"r","delta":"AQI="})");ws.sendText(R"({"type":"response.output_audio.done","event_id":"d","question_id":"q","response_id":"r"})");ws.sendText(R"({"type":"response.done","response_id":"r","usage":{"total_tokens":1}})");}
+  if(type=="speech_text_buffer.commit") {++greetings;ws.sendText(R"({"type":"response.output_audio.delta","event_id":"a","question_id":"q","response_id":"r","delta":"AQI="})");ws.sendText(R"({"type":"response.output_audio.done","event_id":"d","question_id":"q","response_id":"r"})");ws.sendText(R"({"type":"response.done","response_id":"r","usage":{"total_tokens":1}})");}
  });assert(server.listen().first);server.start();
- app::AppOfflineProbe::Run(dir,argv[1],port,sessions);server.stop();std::filesystem::remove_all(dir);
+ app::AppOfflineProbe::Run(dir,mode,port,sessions,greetings);server.stop();std::filesystem::remove_all(dir);
 }
