@@ -149,7 +149,7 @@ def install(a):
         print('SIMULATION: skipped ARM check-config, startup, process/log/native/CPU checks');return
     ssh(a,'cd '+APP+'; ./xiaoai_plus_speaker --check-config -c config.ini >/dev/null')
     offset=int(ssh(a,'if [ -f '+APP+'/xiaoai_plus.log ]; then wc -c < '+APP+'/xiaoai_plus.log; else echo 0; fi').strip())
-    ssh(a,'nohup '+APP+'/boot.sh </dev/null >/dev/null 2>&1 &')
+    ssh(a,'/bin/sh '+APP+'/boot.sh </dev/null >/dev/null',timeout=90)
     wait_ready(a,offset)
     result=ssh(a,"set -eu; test -f "+APP+"/xiaoai_plus.log; pidof xiaoai_plus_speaker; pidof mipns-xiaomi; if { "+log_scope(offset)+"; } | grep -Ei 'error|fatal' >/dev/null; then exit 1; fi")
     if len(result.splitlines())<2: raise RuntimeError('speaker/native process missing')
