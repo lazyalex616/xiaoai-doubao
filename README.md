@@ -67,7 +67,7 @@
 - 原理：[docs/原理.md](docs/原理.md)；移植到别的型号：[docs/移植到其他设备.md](docs/移植到其他设备.md)
 - 手动操作步骤：[docs/搭建指南.md](docs/搭建指南.md)；火山引擎开通和看账单：[docs/火山引擎开通.md](docs/火山引擎开通.md)
 - 给 AI 助手的说明：[AGENTS.md](AGENTS.md)
-- 想支持别的型号或 Windows，欢迎在 Issues 里讨论，也欢迎提交代码。Windows 刷机可以参考 [xiaoai-agent 的 Windows 教程](https://github.com/stevenjoezhang/xiaoai-agent/blob/main/deploy/README.md)。
+- 想支持别的型号或 Windows，欢迎在 Issues 里讨论，也欢迎提交代码。只有 Windows 电脑的，看[搭建指南](docs/搭建指南.md)里"用 Windows 电脑"一节，已有网友在 Windows 11 上装成功。
 
 ```
 xiaoai-plus/   音箱端程序（C++，交叉编译后在音箱上运行）
