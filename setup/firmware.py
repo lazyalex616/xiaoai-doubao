@@ -216,14 +216,12 @@ def prepare(step,a):
             if sha(b/f'{part}.1.bin')!=sha(b/f'{part}.2.bin'): raise RuntimeError('backup hash mismatch; GitHub提Issue')
         check_stock(active);save('backup.json',{'files':{p.name:sha(p) for p in b.glob('*.bin')}})
         if active=='boot1':
-            print('注意：音箱在用 boot1/system1；第 7 步写 system1 属试验功能，尚未在真机验证，需要额外加 --experimental-boot1')
+            print('注意：音箱在用 boot1/system1，第 7 步将写 system1（已在一台网友的音箱上验证）')
     elif step==7:
         if a.reset_only: reset(a);return
         active=boot_part(a)
         if active!=json.loads((LOCAL/'boot-part.json').read_text())['boot_part']:
             raise RuntimeError('boot_part 与第 6 步记录不一致；未写入任何分区；GitHub提Issue')
-        if active=='boot1' and not a.experimental_boot1:
-            raise RuntimeError('写 system1 属试验功能，尚未在真机验证，可能导致音箱无法启动或变砖；接受风险后需额外加 --experimental-boot1；未写入任何分区')
         check_stock(active);manifest=json.loads((LOCAL/'backup.json').read_text())
         for name,digest in manifest['files'].items():
             if sha(LOCAL/'backup'/name)!=digest: raise RuntimeError('backup changed')
@@ -243,7 +241,7 @@ def entry(step=None):
     p.add_argument('--execute',action='store_true',help='明确允许本步USB命令；默认不接触设备')
     p.add_argument('--i-accept-brick-risk',action='store_true',help='允许单次写入正在使用的 system 分区')
     if step==7:
-        p.add_argument('--experimental-boot1',action='store_true',help='接受尚未在真机验证的 system1 试验写入，可能无法启动或变砖')
+        p.add_argument('--experimental-boot1',action='store_true',help=argparse.SUPPRESS)
     p.add_argument('--reset-only',action='store_true',help='配合--execute只发送一次reset，不写分区')
     p.add_argument('--key',type=Path,default=Path('~/.ssh/xiaoai_doubao_rsa'),help='制作补丁用专用RSA4096私钥路径')
     p.add_argument('--unsquashfs',default=shutil.which('unsquashfs') or 'unsquashfs')

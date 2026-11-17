@@ -123,7 +123,7 @@ elif a[0]=='partition':
     def test_backup_boot1(self):
         self.run_step(5,'--execute');self.write('mode','boot1')
         result=self.run_step(6,'--execute')
-        self.assertEqual(result.stdout.splitlines()[-3], '注意：音箱在用 boot1/system1；第 7 步写 system1 属试验功能，尚未在真机验证，需要额外加 --experimental-boot1')
+        self.assertEqual(result.stdout.splitlines()[-3], '注意：音箱在用 boot1/system1，第 7 步将写 system1（已在一台网友的音箱上验证）')
         self.assertEqual(json.loads((self.local/'boot-part.json').read_text()),{'boot_part':'boot1'})
         for part in ('boot0','boot1','system0','system1'):
             copies=[self.local/'backup'/f'{part}.{i}.bin' for i in (1,2)]
@@ -135,12 +135,12 @@ elif a[0]=='partition':
         self.assertFalse(any(line.startswith('partition ') for line in (self.root/'calls').read_text().splitlines()))
     def test_boot1(self):
         self.write('mode','boot1');self.backup()
-        result=self.run_step(7,'--i-accept-brick-risk',ok=False)
-        self.assertIn('试验功能，尚未在真机验证',result.stdout)
-        self.assertIn('无法启动或变砖',result.stdout)
-        self.assertIn('--experimental-boot1',result.stdout)
-        self.assertFalse((self.root/'written').exists())
-        self.assertFalse((self.root/'reset').exists())
+        self.run_step(7,'--i-accept-brick-risk')
+        self.assertEqual((self.root/'written').read_text(),'system1\n')
+        calls=(self.root/'calls').read_text()
+        self.assertIn('mread store system1 normal 0x5 ',calls)
+        self.assertEqual(calls.count('reset'),1)
+        self.assertTrue((self.root/'reset').exists())
     def test_boot1_success(self):
         self.write('mode','boot1');self.backup()
         self.run_step(7,'--i-accept-brick-risk','--experimental-boot1')

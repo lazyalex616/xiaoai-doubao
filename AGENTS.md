@@ -62,7 +62,7 @@
 
 ## 绝对不要做
 
-- 不要对音箱运行 `setenv`、`saveenv`，不要切换启动分区，只能写正在使用的那个 system 分区，通过 07 或"恢复原厂"一节操作；写 system1 是试验，必须用户明确接受变砖风险，并加 `--experimental-boot1`。
+- 不要对音箱运行 `setenv`、`saveenv`，不要切换启动分区，只能写正在使用的那个 system 分区，通过 07 或"恢复原厂"一节操作。
 - 不要碰音箱上 `/data/xiaoai-plus` 以外的东西：`/etc`、原厂小爱进程（mipns、mibrain 等）、其他分区。不要用 `rm -rf`。
 - 不要显示或读出 `.local/volc_key`、`.local/config.ini`、私钥 `~/.ssh/xiaoai_doubao_rsa`、记忆后台的设备密钥。需要确认文件存在时，只看文件名和权限。
 - 不要替用户上传、推送或分享任何文件。
