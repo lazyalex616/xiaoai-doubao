@@ -67,6 +67,7 @@ elif a[0]=='mread':
  if part.startswith('boot'):data=(r/'.local/extracted/boot.img.encrypt').read_bytes()
  elif (r/'written').exists():data=b'WRONG' if m=='mismatch' else b'PATCH'
  else:data=b'STOCK'
+ if m=='boot1' and part=='boot0':data=data[:-1]+b'X'
  if m=='backup_mismatch' and a[5].endswith('.2.bin'):data=b'BAD'+data[3:]
  Path(a[5]).write_bytes((data+b'\\0'*size)[:size])
 elif a[0]=='partition':(r/'written').touch()
@@ -114,8 +115,23 @@ elif a[0]=='partition':(r/'written').touch()
         self.assertFalse((self.local/'usb.json').exists())
 
     def test_wrong_port(self):self.write('mode','wrong');self.run_step(5,'--execute',ok=False)
+    def test_backup_boot1(self):
+        self.run_step(5,'--execute');self.write('mode','boot1')
+        result=self.run_step(6,'--execute',ok=False)
+        self.assertEqual(result.stdout.splitlines()[-2], 'STOP: boot_part=boot1 unsupported：音箱在用第二套系统 boot1/system1（常见于升级后），本项目暂只支持 boot0；双读备份已保存，未写入任何分区；见 https://github.com/rolazd/xiaoai-doubao/issues/2')
+        self.assertEqual(json.loads((self.local/'boot-part.json').read_text()),{'boot_part':'boot1'})
+        for part in ('boot0','boot1','system0','system1'):
+            copies=[self.local/'backup'/f'{part}.{i}.bin' for i in (1,2)]
+            self.assertTrue(all(p.is_file() and p.stat().st_size>0 for p in copies))
+            self.assertEqual(*(firmware.sha(p) for p in copies))
+        self.assertFalse((self.root/'written').exists())
+        self.assertFalse((self.root/'reset').exists())
+        self.assertFalse((self.local/'backup.json').exists())
+        self.assertFalse(any(line.startswith('partition ') for line in (self.root/'calls').read_text().splitlines()))
     def test_boot1(self):
-        self.backup();self.write('mode','boot1');self.run_step(7,'--i-accept-brick-risk',ok=False);self.assertFalse((self.root/'written').exists())
+        self.backup();self.write('mode','boot1');result=self.run_step(7,'--i-accept-brick-risk',ok=False)
+        self.assertEqual(result.stdout.splitlines()[-2], 'STOP: boot_part=boot1 unsupported：音箱在用第二套系统 boot1/system1（常见于升级后），本项目暂只支持 boot0；双读备份已保存，未写入任何分区；见 https://github.com/rolazd/xiaoai-doubao/issues/2')
+        self.assertFalse((self.root/'written').exists())
     def test_readback_mismatch(self):
         self.backup();self.write('mode','mismatch');self.run_step(7,'--i-accept-brick-risk',ok=False);self.assertFalse((self.root/'reset').exists())
     def test_backup_mismatch(self):

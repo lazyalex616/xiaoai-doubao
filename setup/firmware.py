@@ -198,7 +198,7 @@ def prepare(step,a):
             time.sleep(.1)
         raise RuntimeError('USB window timed out')
     elif step==6:
-        part=boot_part(a);save('boot-part.json',{'boot_part':part})
+        active=boot_part(a);save('boot-part.json',{'boot_part':active})
         b=LOCAL/'backup';b.mkdir(mode=0o700,exist_ok=True)
         for part in ('boot0','boot1','system0','system1'):
             # Derive boot image length from Android header, retaining its 512-byte trailer.
@@ -212,10 +212,11 @@ def prepare(step,a):
             for i in (1,2): read(a,part,size,b/f'{part}.{i}.bin')
             if part.startswith('boot') and (b/f'{part}.1.bin').read_bytes()[:4096]!=head.read_bytes()[:min(size,4096)]: raise RuntimeError('boot header changed')
             if sha(b/f'{part}.1.bin')!=sha(b/f'{part}.2.bin'): raise RuntimeError('backup hash mismatch; GitHub提Issue')
+        if active!='boot0': raise RuntimeError('boot_part=boot1 unsupported：音箱在用第二套系统 boot1/system1（常见于升级后），本项目暂只支持 boot0；双读备份已保存，未写入任何分区；见 https://github.com/rolazd/xiaoai-doubao/issues/2')
         check_stock();save('backup.json',{'files':{p.name:sha(p) for p in b.glob('*.bin')}})
     elif step==7:
         if a.reset_only: reset(a);return
-        if boot_part(a)!='boot0': raise RuntimeError('boot_part=boot1 unsupported; GitHub提Issue')
+        if boot_part(a)!='boot0': raise RuntimeError('boot_part=boot1 unsupported：音箱在用第二套系统 boot1/system1（常见于升级后），本项目暂只支持 boot0；双读备份已保存，未写入任何分区；见 https://github.com/rolazd/xiaoai-doubao/issues/2')
         check_stock();manifest=json.loads((LOCAL/'backup.json').read_text())
         for name,digest in manifest['files'].items():
             if sha(LOCAL/'backup'/name)!=digest: raise RuntimeError('backup changed')
