@@ -20,8 +20,9 @@ OTA_URL = 'https://cdn.cnbj1.fds.api.mi-img.com/xiaoqiang/rom/oh2p/mico_all_616c
 OTA_SHA = '08c6c0c5e7dfd3de59a7e37b4709ad90ab84e8025c799a642730e97ef53c0eba'
 TOOL_URL = 'https://raw.githubusercontent.com/khadas/utils/0dee958a4c3c53c0546ef98758ed721183f11a5f/aml-flash-tool/tools/macos/update'
 TOOL_SHA = '19f37cc129d061512c24bffbbad3a51355d976c12d6091366fe7dfce3c949b30'
+SYSTEM = {'boot0':'system0','boot1':'system1'}
 NEXT = {1:'bash setup/02-get-firmware.sh',2:'bash setup/03-make-patch.sh',3:'bash setup/04-get-flash-tool.sh',4:'连接原装12V电源和数据Type-C线，然后 python3 setup/05-usb-connect.py --execute',5:'bash setup/06-backup.sh --execute',6:'刷写用 bash setup/07-flash.sh --i-accept-brick-risk；只读彩排用 --reset-only --execute',7:'在米家App抄下MAC，运行 bash setup/08-find-speaker.sh <MAC>'}
-DESC = {1:'检查Apple芯片Mac和依赖；用户按打印的brew命令自行安装。',2:'下载并核对OH2P 1.62.2，解包原厂rootfs；用户保持联网。',3:'生成专用RSA4096密钥，以公钥制作仅修改5个路径的镜像；不连接设备。',4:'下载固定Khadas update并取arm64，链接Homebrew libusb-compat；不访问USB。',5:'捕获同端口刷机窗口；先接电源和数据线，出现READY_TO_PLUG后拔DC立即插回；默认仅打印命令，--execute才identify。',6:'校准boot_part并双读boot0/boot1/system0/system1；用户保持电源和USB不动；--execute才读取。',7:'仅刷一次system0并读回，相同才reset；用户保持电源和USB不动；--i-accept-brick-risk才写；--reset-only --execute只reset。'}
+DESC = {1:'检查Apple芯片Mac和依赖；用户按打印的brew命令自行安装。',2:'下载并核对OH2P 1.62.2，解包原厂rootfs；用户保持联网。',3:'生成专用RSA4096密钥，以公钥制作仅修改5个路径的镜像；不连接设备。',4:'下载固定Khadas update并取arm64，链接Homebrew libusb-compat；不访问USB。',5:'捕获同端口刷机窗口；先接电源和数据线，出现READY_TO_PLUG后拔DC立即插回；默认仅打印命令，--execute才identify。',6:'校准boot_part并双读boot0/boot1/system0/system1；用户保持电源和USB不动；--execute才读取。',7:'仅刷一次正在使用的system分区并读回，相同才reset；用户保持电源和USB不动；--i-accept-brick-risk才写；--reset-only --execute只reset。'}
 
 class StatusParser(argparse.ArgumentParser):
     def error(self, message):
@@ -126,12 +127,13 @@ def read(a, part, size, dest):
     dest.chmod(0o600)
     if dest.stat().st_size!=size: raise RuntimeError('read length mismatch')
 
-def check_stock():
+def check_stock(active):
     b=LOCAL/'backup';ota=LOCAL/'extracted'
-    if sha(b/'boot0.1.bin')!=sha(ota/'boot.img.encrypt'): raise RuntimeError('boot0 differs from OTA; GitHub提Issue')
+    system=SYSTEM[active]
+    if sha(b/(active+'.1.bin'))!=sha(ota/'boot.img.encrypt'): raise RuntimeError(active+' differs from OTA; GitHub提Issue')
     stock=(ota/'root.squashfs').read_bytes()
-    with (b/'system0.1.bin').open('rb') as f:
-        if f.read(len(stock))!=stock: raise RuntimeError('system0 prefix differs from OTA; GitHub提Issue')
+    with (b/(system+'.1.bin')).open('rb') as f:
+        if f.read(len(stock))!=stock: raise RuntimeError(system+' prefix differs from OTA; GitHub提Issue')
 
 def prepare(step,a):
     if step==2:
@@ -212,19 +214,25 @@ def prepare(step,a):
             for i in (1,2): read(a,part,size,b/f'{part}.{i}.bin')
             if part.startswith('boot') and (b/f'{part}.1.bin').read_bytes()[:4096]!=head.read_bytes()[:min(size,4096)]: raise RuntimeError('boot header changed')
             if sha(b/f'{part}.1.bin')!=sha(b/f'{part}.2.bin'): raise RuntimeError('backup hash mismatch; GitHub提Issue')
-        if active!='boot0': raise RuntimeError('boot_part=boot1 unsupported：音箱在用第二套系统 boot1/system1（常见于升级后），本项目暂只支持 boot0；双读备份已保存，未写入任何分区；见 https://github.com/rolazd/xiaoai-doubao/issues/2')
-        check_stock();save('backup.json',{'files':{p.name:sha(p) for p in b.glob('*.bin')}})
+        check_stock(active);save('backup.json',{'files':{p.name:sha(p) for p in b.glob('*.bin')}})
+        if active=='boot1':
+            print('注意：音箱在用 boot1/system1；第 7 步写 system1 属试验功能，尚未在真机验证，需要额外加 --experimental-boot1')
     elif step==7:
         if a.reset_only: reset(a);return
-        if boot_part(a)!='boot0': raise RuntimeError('boot_part=boot1 unsupported：音箱在用第二套系统 boot1/system1（常见于升级后），本项目暂只支持 boot0；双读备份已保存，未写入任何分区；见 https://github.com/rolazd/xiaoai-doubao/issues/2')
-        check_stock();manifest=json.loads((LOCAL/'backup.json').read_text())
+        active=boot_part(a)
+        if active!=json.loads((LOCAL/'boot-part.json').read_text())['boot_part']:
+            raise RuntimeError('boot_part 与第 6 步记录不一致；未写入任何分区；GitHub提Issue')
+        if active=='boot1' and not a.experimental_boot1:
+            raise RuntimeError('写 system1 属试验功能，尚未在真机验证，可能导致音箱无法启动或变砖；接受风险后需额外加 --experimental-boot1；未写入任何分区')
+        check_stock(active);manifest=json.loads((LOCAL/'backup.json').read_text())
         for name,digest in manifest['files'].items():
             if sha(LOCAL/'backup'/name)!=digest: raise RuntimeError('backup changed')
         image=LOCAL/'root-patched.squashfs';size=image.stat().st_size
         if sha(image)!=json.loads((LOCAL/'patch.json').read_text())['sha256']: raise RuntimeError('patch hash changed')
         if not 0<size<0x02800000: raise RuntimeError('patch length out of range')
-        tool(a,'partition','system0',image)
-        dest=LOCAL/'flash-readback.bin';read(a,'system0',size,dest)
+        system=SYSTEM[active]
+        tool(a,'partition',system,image)
+        dest=LOCAL/'flash-readback.bin';read(a,system,size,dest)
         if sha(dest)!=sha(image): raise RuntimeError('readback hash mismatch; no reset; GitHub提Issue')
         reset(a)
 
@@ -233,7 +241,9 @@ def entry(step=None):
     step=step or int(sys.argv.pop(1))
     p=StatusParser(description=DESC[step],epilog='OK: help complete\nNEXT: 按本步说明操作；日志和产物在.local/。',formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--execute',action='store_true',help='明确允许本步USB命令；默认不接触设备')
-    p.add_argument('--i-accept-brick-risk',action='store_true',help='接受刷坏风险，允许单次system0写入')
+    p.add_argument('--i-accept-brick-risk',action='store_true',help='允许单次写入正在使用的 system 分区')
+    if step==7:
+        p.add_argument('--experimental-boot1',action='store_true',help='接受尚未在真机验证的 system1 试验写入，可能无法启动或变砖')
     p.add_argument('--reset-only',action='store_true',help='配合--execute只发送一次reset，不写分区')
     p.add_argument('--key',type=Path,default=Path('~/.ssh/xiaoai_doubao_rsa'),help='制作补丁用专用RSA4096私钥路径')
     p.add_argument('--unsquashfs',default=shutil.which('unsquashfs') or 'unsquashfs')
@@ -245,7 +255,10 @@ def entry(step=None):
     a=p.parse_args()
     if not 3<=a.duration<=120: p.error('duration must be 3..120')
     if step>=5 and not (a.i_accept_brick_risk if step==7 and not a.reset_only else a.execute):
-        print({5:'update identify 7',6:'update bulkcmd test; update mread store <boot0/boot1/system0/system1> normal <length> <file> (twice)',7:'update bulkcmd "     reset"' if a.reset_only else 'update partition system0 .local/root-patched.squashfs; update mread ...; update bulkcmd "     reset"'}[step])
+        system='<system0|system1>'
+        if step==7 and not a.reset_only and (LOCAL/'boot-part.json').exists():
+            system=SYSTEM.get(json.loads((LOCAL/'boot-part.json').read_text()).get('boot_part'),system)
+        print({5:'update identify 7',6:'update bulkcmd test; update mread store <boot0/boot1/system0/system1> normal <length> <file> (twice)',7:'update bulkcmd "     reset"' if a.reset_only else 'update partition '+system+' .local/root-patched.squashfs; update mread ...; update bulkcmd "     reset"'}[step])
         print('OK: dry run; no device commands\nNEXT: '+NEXT[step]);return
     LOCAL.mkdir(mode=0o700,exist_ok=True)
     try:

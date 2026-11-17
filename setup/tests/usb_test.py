@@ -60,17 +60,20 @@ elif a[0]=='bulkcmd':
   (r/'reset').touch()
   if m=='reset_err':print('ERR: bulkcmd failed!');sys.exit(197)
   sys.exit(0)
- ok=c=='test 1 = 1' or ('boot0' in c and m!='boot1') or ('boot1' in c and m=='boot1')
+ boot1=m.startswith('boot1')
+ ok=c=='test 1 = 1' or ('boot0' in c and not boot1) or ('boot1' in c and boot1)
  print('bulkInReply success' if ok else 'failed')
 elif a[0]=='mread':
  part=a[2];size=int(a[4],16)
  if part.startswith('boot'):data=(r/'.local/extracted/boot.img.encrypt').read_bytes()
- elif (r/'written').exists():data=b'WRONG' if m=='mismatch' else b'PATCH'
+ elif (r/'written').exists() and part in (r/'written').read_text().splitlines():data=b'WRONG' if m in ('mismatch','boot1_mismatch') else b'PATCH'
  else:data=b'STOCK'
- if m=='boot1' and part=='boot0':data=data[:-1]+b'X'
+ if m.startswith('boot1') and part=='boot0':data=data[:-1]+b'X'
+ if m=='boot1_stock_mismatch' and part=='system1':data=b'OTHER'
  if m=='backup_mismatch' and a[5].endswith('.2.bin'):data=b'BAD'+data[3:]
  Path(a[5]).write_bytes((data+b'\\0'*size)[:size])
-elif a[0]=='partition':(r/'written').touch()
+elif a[0]=='partition':
+ with (r/'written').open('a') as f:f.write(a[1]+'\\n')
 ''')
         for p in (self.ioreg,self.update):p.chmod(0o700)
         (self.local/'tool.json').write_text(json.dumps({'sha256':hashlib.sha256(self.update.read_bytes()).hexdigest()}))
@@ -88,6 +91,8 @@ elif a[0]=='partition':(r/'written').touch()
     def test_success(self):
         self.backup();self.run_step(7,'--i-accept-brick-risk');self.assertTrue((self.root/'reset').exists())
         calls=(self.root/'calls').read_text();self.assertEqual(calls.count('partition system0'),1);self.assertEqual(calls.count('reset'),1)
+        self.assertEqual((self.root/'written').read_text(),'system0\n')
+        self.assertIn('mread store system0 normal 0x5 ',calls)
     def test_two_normal(self):self.write('mode','two');self.run_step(5,'--execute',ok=False)
     def test_identify_output_and_log(self):
         for mode,ok,raw in (
@@ -117,8 +122,8 @@ elif a[0]=='partition':(r/'written').touch()
     def test_wrong_port(self):self.write('mode','wrong');self.run_step(5,'--execute',ok=False)
     def test_backup_boot1(self):
         self.run_step(5,'--execute');self.write('mode','boot1')
-        result=self.run_step(6,'--execute',ok=False)
-        self.assertEqual(result.stdout.splitlines()[-2], 'STOP: boot_part=boot1 unsupported：音箱在用第二套系统 boot1/system1（常见于升级后），本项目暂只支持 boot0；双读备份已保存，未写入任何分区；见 https://github.com/rolazd/xiaoai-doubao/issues/2')
+        result=self.run_step(6,'--execute')
+        self.assertEqual(result.stdout.splitlines()[-3], '注意：音箱在用 boot1/system1；第 7 步写 system1 属试验功能，尚未在真机验证，需要额外加 --experimental-boot1')
         self.assertEqual(json.loads((self.local/'boot-part.json').read_text()),{'boot_part':'boot1'})
         for part in ('boot0','boot1','system0','system1'):
             copies=[self.local/'backup'/f'{part}.{i}.bin' for i in (1,2)]
@@ -126,19 +131,64 @@ elif a[0]=='partition':(r/'written').touch()
             self.assertEqual(*(firmware.sha(p) for p in copies))
         self.assertFalse((self.root/'written').exists())
         self.assertFalse((self.root/'reset').exists())
-        self.assertFalse((self.local/'backup.json').exists())
+        self.assertTrue((self.local/'backup.json').exists())
         self.assertFalse(any(line.startswith('partition ') for line in (self.root/'calls').read_text().splitlines()))
     def test_boot1(self):
-        self.backup();self.write('mode','boot1');result=self.run_step(7,'--i-accept-brick-risk',ok=False)
-        self.assertEqual(result.stdout.splitlines()[-2], 'STOP: boot_part=boot1 unsupported：音箱在用第二套系统 boot1/system1（常见于升级后），本项目暂只支持 boot0；双读备份已保存，未写入任何分区；见 https://github.com/rolazd/xiaoai-doubao/issues/2')
+        self.write('mode','boot1');self.backup()
+        result=self.run_step(7,'--i-accept-brick-risk',ok=False)
+        self.assertIn('试验功能，尚未在真机验证',result.stdout)
+        self.assertIn('无法启动或变砖',result.stdout)
+        self.assertIn('--experimental-boot1',result.stdout)
         self.assertFalse((self.root/'written').exists())
+        self.assertFalse((self.root/'reset').exists())
+    def test_boot1_success(self):
+        self.write('mode','boot1');self.backup()
+        self.run_step(7,'--i-accept-brick-risk','--experimental-boot1')
+        self.assertEqual((self.root/'written').read_text(),'system1\n')
+        calls=(self.root/'calls').read_text()
+        self.assertIn('mread store system1 normal 0x5 ',calls)
+        self.assertEqual(calls.count('reset'),1)
+        self.assertTrue((self.root/'reset').exists())
+    def test_boot_part_changed(self):
+        self.backup();self.write('mode','boot1')
+        result=self.run_step(7,'--i-accept-brick-risk','--experimental-boot1',ok=False)
+        self.assertIn('boot_part 与第 6 步记录不一致',result.stdout)
+        self.assertFalse((self.root/'written').exists())
+        self.assertFalse((self.root/'reset').exists())
+    def test_boot1_part_changed_to_boot0(self):
+        self.write('mode','boot1');self.backup();self.write('mode','ok')
+        result=self.run_step(7,'--i-accept-brick-risk','--experimental-boot1',ok=False)
+        self.assertIn('boot_part 与第 6 步记录不一致',result.stdout)
+        self.assertFalse((self.root/'written').exists())
+    def test_boot1_stock_mismatch(self):
+        self.write('mode','boot1_stock_mismatch');self.run_step(5,'--execute')
+        result=self.run_step(6,'--execute',ok=False)
+        self.assertIn('system1 prefix differs from OTA',result.stdout)
+        self.assertFalse((self.local/'backup.json').exists())
+        self.assertFalse((self.root/'written').exists())
+    def test_boot1_readback_mismatch(self):
+        self.write('mode','boot1');self.backup();self.write('mode','boot1_mismatch')
+        result=self.run_step(7,'--i-accept-brick-risk','--experimental-boot1',ok=False)
+        self.assertIn('readback hash mismatch',result.stdout)
+        self.assertEqual((self.root/'written').read_text(),'system1\n')
+        self.assertFalse((self.root/'reset').exists())
     def test_readback_mismatch(self):
         self.backup();self.write('mode','mismatch');self.run_step(7,'--i-accept-brick-risk',ok=False);self.assertFalse((self.root/'reset').exists())
     def test_backup_mismatch(self):
         self.run_step(5,'--execute');self.write('mode','backup_mismatch');self.run_step(6,'--execute',ok=False)
         self.assertFalse((self.root/'reset').exists())
     def test_dry_run(self):
-        self.run_step(7);self.assertFalse((self.root/'calls').exists());self.assertFalse((self.root/'count').exists())
+        result=self.run_step(7)
+        self.assertIn('update partition <system0|system1> ',result.stdout)
+        for active in ('boot0','boot1'):
+            with self.subTest(active=active):
+                (self.local/'boot-part.json').write_text(json.dumps({'boot_part':active}))
+                result=self.run_step(7,'--experimental-boot1')
+                self.assertIn('update partition '+firmware.SYSTEM[active]+' ',result.stdout)
+        self.assertFalse((self.root/'calls').exists());self.assertFalse((self.root/'count').exists())
+    def test_experimental_boot1_only_step7(self):
+        self.run_step(6,'--execute','--experimental-boot1',ok=False)
+        self.assertFalse((self.root/'calls').exists())
     def test_reset_only(self):
         self.run_step(5,'--execute');self.run_step(7,'--reset-only','--execute');self.assertTrue((self.root/'reset').exists());self.assertFalse((self.root/'written').exists())
 
